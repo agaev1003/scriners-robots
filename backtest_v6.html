@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Backtest V6 — Insides Without Inside</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+header{background:var(--surface);padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border)}
+header h1{font-size:20px;font-weight:600}
+header .subtitle{color:var(--muted);font-size:13px}
+.container{max-width:1400px;margin:0 auto;padding:16px}
+.settings{background:var(--surface);border-radius:8px;padding:16px;margin-bottom:16px;border:1px solid var(--border)}
+.settings h3{margin-bottom:12px;font-size:15px;color:var(--accent)}
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px}
+.field input,.field select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:4px;font-size:13px}
+.field input:focus,.field select:focus{outline:none;border-color:var(--accent)}
+.tiers-row{display:flex;gap:12px;align-items:center;margin-top:8px}
+.tiers-row label{font-size:13px;display:flex;align-items:center;gap:4px;cursor:pointer}
+.btn{background:var(--accent);color:#fff;border:none;padding:10px 28px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn:hover{opacity:0.85}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn-sm{padding:6px 14px;font-size:12px;border-radius:4px}
+.progress-bar{background:var(--surface);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:none;border:1px solid var(--border)}
+.progress-bar .bar{background:var(--bg);border-radius:4px;height:8px;overflow:hidden;margin-top:6px}
+.progress-bar .fill{background:var(--accent);height:100%;transition:width .3s;width:0}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:16px}
+.stat-card{background:var(--surface);border-radius:6px;padding:12px;border:1px solid var(--border);text-align:center}
+.stat-card .val{font-size:20px;font-weight:700;margin:4px 0}
+.stat-card .lbl{font-size:11px;color:var(--muted);text-transform:uppercase}
+.stat-card.green .val{color:var(--green)}
+.stat-card.red .val{color:var(--red)}
+.charts-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.chart-box{background:var(--surface);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.chart-box h4{font-size:13px;color:var(--muted);margin-bottom:8px}
+.chart-box canvas{width:100%!important;max-height:300px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:var(--card);padding:8px 6px;text-align:left;font-weight:600;position:sticky;top:0;cursor:pointer;user-select:none}
+td{padding:6px;border-bottom:1px solid var(--border)}
+tr:hover td{background:rgba(233,69,96,0.05)}
+.tbl-wrap{background:var(--surface);border-radius:8px;border:1px solid var(--border);overflow:auto;max-height:500px;margin-bottom:16px}
+.tbl-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px}
+.tbl-header h3{font-size:15px}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.tag{display:inline-block;padding:2px 6px;border-radius:3px;font-size:11px;font-weight:600}
+.tag-ultra{background:#6c5ce7;color:#fff}
+.tag-strong{background:#0984e3;color:#fff}
+.tag-base{background:#636e72;color:#fff}
+.oos-box{background:var(--surface);border-radius:8px;padding:16px;margin-bottom:16px;border:1px solid var(--border)}
+.oos-box h3{margin-bottom:12px}
+.verdict{font-weight:700;padding:4px 8px;border-radius:4px;display:inline-block}
+.verdict-confirmed{background:var(--green);color:#000}
+.verdict-degrading{background:var(--red);color:#fff}
+.verdict-insufficient{background:#636e72;color:#fff}
+.hidden{display:none!important}
+@media(max-width:900px){.charts-grid{grid-template-columns:1fr}.settings-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Backtest V6</h1>
+  <span class="subtitle">Insides Without Inside — MOEX Volume Breakout Strategy</span>
+</header>
+<div class="container">
+  <div class="settings">
+    <h3>Параметры</h3>
+    <div class="settings-grid">
+      <div class="field"><label>Капитал (₽)</label><input id="cfgCapital" type="number" value="1000000"></div>
+      <div class="field"><label>Год старта</label><input id="cfgStartYear" type="number" value="2015"></div>
+      <div class="field"><label>Макс. поз. S1</label><input id="cfgMaxPos1" type="number" value="2" min="1" max="10"></div>
+      <div class="field"><label>Макс. поз. S2</label><input id="cfgMaxPos2" type="number" value="2" min="1" max="10"></div>
+      <div class="field"><label>Комиссия %</label><input id="cfgCommission" type="number" value="0.05" step="0.01"></div>
+      <div class="field"><label>Slippage %</label><input id="cfgSlippage" type="number" value="0.10" step="0.01"></div>
+      <div class="field"><label>OOS год</label><input id="cfgOosYear" type="number" value="2023"></div>
+      <div class="field"><label>Макс. VR</label><input id="cfgMaxVr" type="number" value="10" step="0.5"></div>
+      <div class="field"><label>Стоп-лосс %</label><input id="cfgStopLoss" type="number" value="28" step="1"></div>
+      <div class="field"><label>Ребалансировка</label>
+        <select id="cfgRebal"><option value="none">Нет</option><option value="half">50%</option><option value="quarter">25%</option></select>
+      </div>
+      <div class="field"><label>Шорт-режим</label>
+        <select id="cfgShort"><option value="off">Off</option><option value="mirror">Mirror</option><option value="hedge">Hedge</option><option value="constant">Constant</option><option value="silence">Silence</option><option value="pair">Pair</option></select>
+      </div>
+      <div class="field"><label>Макс. поз. Short</label><input id="cfgMaxPosS" type="number" value="2" min="1" max="10"></div>
+      <div class="field"><label>Дней тишины</label><input id="cfgSilence" type="number" value="20" min="1"></div>
+    </div>
+    <div class="tiers-row">
+      <span style="font-size:12px;color:var(--muted)">Тиры:</span>
+      <label><input type="checkbox" id="tierBase" checked> BASE</label>
+      <label><input type="checkbox" id="tierStrong" checked> STRONG</label>
+      <label><input type="checkbox" id="tierUltra" checked> ULTRA</label>
+      <button class="btn" id="btnRun" style="margin-left:auto">▶ Запустить бэктест</button>
+    </div>
+  </div>
+
+  <div class="progress-bar" id="progressBox">
+    <span id="progressText">Загрузка данных...</span>
+    <div class="bar"><div class="fill" id="progressFill"></div></div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="stats-grid" id="statsGrid"></div>
+    <div class="charts-grid">
+      <div class="chart-box"><h4>Equity Curve</h4><canvas id="chartEquity"></canvas></div>
+      <div class="chart-box"><h4>Доходность по годам</h4><canvas id="chartYears"></canvas></div>
+      <div class="chart-box"><h4>Распределение доходности сделок</h4><canvas id="chartDist"></canvas></div>
+      <div class="chart-box"><h4>Средняя доходность по месяцам</h4><canvas id="chartMonthly"></canvas></div>
+    </div>
+    <div class="oos-box" id="oosBox"></div>
+    <div class="tbl-wrap">
+      <div class="tbl-header"><h3>Результаты по годам</h3></div>
+      <table id="tblYears"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="tbl-wrap">
+      <div class="tbl-header">
+        <h3>Все сделки</h3>
+        <button class="btn btn-sm" id="btnCsv">CSV</button>
+      </div>
+      <table id="tblTrades"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   CONSTANTS
+   ═══════════════════════════════════════════════════════════════════════ */
+const VOL_WIN = 60;
+const LIQ = 100_000_000;
+const LIQ_AVG_WIN = 200;
+const SHORT_LIQ_MIN = 200_000_000;
+const BLACKLIST = new Set(['MOEX','IRAO','FEES']);
+const MIN_BARS = 100;
+const BORROW_COST_ANNUAL = 0.025;
+const BORROW_COST_DAILY = BORROW_COST_ANNUAL / 252;
+
+const TIERS = [
+  { name:'ULTRA',  minVr:7.0, maxHold:15, tsAfter:6, tsDist:2.6 },
+  { name:'STRONG', minVr:6.5, maxHold:13, tsAfter:6, tsDist:1.8 },
+  { name:'BASE',   minVr:3.6, maxHold:10, tsAfter:5, tsDist:1.4 },
+];
+
+const SECTOR_MAP = {
+  LKOH:'ROSN',ROSN:'LKOH',SNGS:'LKOH',SNGSP:'LKOH',TATN:'LKOH',TATNP:'LKOH',
+  SIBN:'LKOH',BANEP:'LKOH',BANE:'LKOH',RNFT:'LKOH',GAZP:'ROSN',NVTK:'ROSN',
+  GMKN:'NLMK',NLMK:'CHMF',CHMF:'NLMK',MAGN:'NLMK',MTLR:'NLMK',MTLRP:'NLMK',
+  RUAL:'GMKN',PLZL:'POLY',POLY:'PLZL',ALRS:'GMKN',AMEZ:'NLMK',TRMK:'NLMK',
+  SBER:'VTBR',VTBR:'SBER',SBERP:'VTBR',TCSG:'SBER',BSPB:'SBER',CBOM:'SBER',
+  MTSS:'RTKM',RTKM:'MTSS',MGTS:'MTSS',MGTSP:'MTSS',VKCO:'MTSS',YDEX:'MTSS',
+  HYDR:'IRAO',MSNG:'IRAO',OGKB:'IRAO',TGKA:'IRAO',TGKB:'IRAO',TGKN:'IRAO',
+  DVEC:'IRAO',MRKC:'IRAO',MRKU:'IRAO',MRKV:'IRAO',
+  MGNT:'FIVE',FIVE:'MGNT',LENT:'MGNT',OKEY:'MGNT',MVID:'MGNT',
+  PIKK:'LSRG',LSRG:'PIKK',SMLT:'PIKK',
+  PHOR:'AKRN',AKRN:'PHOR',NKNC:'PHOR',KZOS:'PHOR',
+  AFLT:'NMTP',NMTP:'AFLT',FLOT:'NMTP',
+};
+const DEFAULT_PAIR = 'SBER';
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UTILITIES
+   ═══════════════════════════════════════════════════════════════════════ */
+class Semaphore {
+  constructor(n){this.max=n;this.cnt=0;this.q=[]}
+  async acquire(){if(this.cnt<this.max){this.cnt++;return}await new Promise(r=>this.q.push(r));this.cnt++}
+  release(){this.cnt--;if(this.q.length)this.q.shift()()}
+}
+const sem = new Semaphore(8);
+
+async function fetchRetry(url, retries=2, backoff=300) {
+  for(let i=0;i<=retries;i++){
+    try{
+      const ctrl=new AbortController();
+      const t=setTimeout(()=>ctrl.abort(),20000);
+      const r=await fetch(url,{signal:ctrl.signal});
+      clearTimeout(t);
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return await r.json();
+    }catch(e){
+      if(i===retries) throw e;
+      await new Promise(r=>setTimeout(r,backoff*(i+1)));
+    }
+  }
+}
+
+function readCfg(){
+  const v=id=>document.getElementById(id).value;
+  const n=id=>parseFloat(v(id));
+  const c=id=>document.getElementById(id).checked;
+  return {
+    capital:n('cfgCapital'), startYear:n('cfgStartYear'),
+    maxPos1:n('cfgMaxPos1')|0, maxPos2:n('cfgMaxPos2')|0,
+    commission:n('cfgCommission')/100, slippage:n('cfgSlippage')/100,
+    oosYear:n('cfgOosYear')|0, maxVr:n('cfgMaxVr'),
+    stopPct:n('cfgStopLoss'), rebal:v('cfgRebal'),
+    shortMode:v('cfgShort'), maxPosShort:n('cfgMaxPosS')|0,
+    silenceDays:n('cfgSilence')|0,
+    tierBase:c('tierBase'), tierStrong:c('tierStrong'), tierUltra:c('tierUltra'),
+  };
+}
+
+function progress(text, pct){
+  const box=document.getElementById('progressBox');
+  box.style.display='block';
+  document.getElementById('progressText').textContent=text;
+  document.getElementById('progressFill').style.width=pct+'%';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DATA LOADING — MOEX ISS
+   ═══════════════════════════════════════════════════════════════════════ */
+const MOEX_BASE='https://iss.moex.com/iss';
+
+async function loadTickerList(){
+  const url=`${MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=securities&securities.columns=SECID,SHORTNAME,LISTLEVEL`;
+  const d=await fetchRetry(url);
+  const rows=d.securities.data;
+  return rows.filter(r=>r[2]>=1&&r[2]<=3&&!BLACKLIST.has(r[0])).map(r=>r[0]);
+}
+
+async function loadCandles(ticker, fromDate){
+  await sem.acquire();
+  try{
+    let all=[];
+    let start=0;
+    while(true){
+      const url=`${MOEX_BASE}/engines/stock/markets/shares/boards/TQBR/securities/${ticker}/candles.json?interval=24&from=${fromDate}&iss.meta=off&iss.only=candles&candles.columns=begin,open,close,high,low,volume&start=${start}`;
+      const d=await fetchRetry(url);
+      const rows=d.candles.data;
+      if(!rows.length) break;
+      for(const r of rows){
+        all.push({d:r[0].slice(0,10), o:+r[1], c:+r[2], h:+r[3], l:+r[4], v:+r[5]});
+      }
+      if(rows.length<500) break;
+      start+=500;
+    }
+    return all;
+  }finally{sem.release()}
+}
+
+async function loadBenchmark(index, from, till){
+  let all=[];
+  let start=0;
+  while(true){
+    const url=`${MOEX_BASE}/statistics/engines/stock/markets/index/analytics/${index}.json?from=${from}&till=${till}&limit=100&start=${start}`;
+    try{
+      const d=await fetchRetry(url);
+      const cols=d.analytics.columns;
+      const rows=d.analytics.data;
+      if(!rows.length) break;
+      const di=cols.indexOf('tradedate'), ci=cols.indexOf('close');
+      for(const r of rows) all.push({d:r[di], c:+r[ci]});
+      if(rows.length<100) break;
+      start+=100;
+    }catch(e){break}
+  }
+  return all;
+}
+
+async function loadAllData(cfg){
+  progress('Загрузка списка тикеров...',0);
+  const tickers=await loadTickerList();
+  progress(`Найдено ${tickers.length} тикеров. Загрузка свечей...`,5);
+
+  const fromDate=`${cfg.startYear-1}-01-01`;
+  const tickerData={};
+  let done=0;
+  const total=tickers.length;
+
+  const tasks=tickers.map(async tk=>{
+    try{
+      const bars=await loadCandles(tk,fromDate);
+      if(bars.length>=MIN_BARS) tickerData[tk]=bars;
+    }catch(e){}
+    done++;
+    if(done%10===0||done===total) progress(`Свечи: ${done}/${total}`,5+done/total*70);
+  });
+  await Promise.all(tasks);
+
+  progress('Загрузка бенчмарка...',80);
+  const till=new Date().toISOString().slice(0,10);
+  let bench=await loadBenchmark('MCFTRR',fromDate,till);
+  if(!bench.length) bench=await loadBenchmark('IMOEX',fromDate,till);
+
+  let imoex=await loadBenchmark('IMOEX',fromDate,till);
+  if(!imoex.length) imoex=bench;
+
+  progress('Данные загружены!',85);
+  return {tickerData, bench, imoex};
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INDICATORS
+   ═══════════════════════════════════════════════════════════════════════ */
+function avgVol(data, i){
+  if(i<VOL_WIN) return null;
+  let s=0,cnt=0;
+  for(let k=i-VOL_WIN;k<i;k++){
+    if(data[k].v>0){s+=data[k].v;cnt++}
+  }
+  return cnt<VOL_WIN*0.7?null:s/cnt;
+}
+
+function ma50(data,i){
+  if(i<49) return null;
+  let s=0;
+  for(let k=i-49;k<=i;k++) s+=data[k].c;
+  return s/50;
+}
+
+function closePos(bar){
+  const rng=bar.h-bar.l;
+  return rng>0?(bar.c-bar.l)/rng:0.5;
+}
+
+function atrPct(data,i){
+  if(i<1) return 0;
+  const start=Math.max(1,i-19);
+  let sum=0,cnt=0;
+  for(let k=start;k<=i;k++){
+    const hi=data[k].h>0?data[k].h:data[k].c;
+    const lo=data[k].l>0?data[k].l:data[k].c;
+    const pc=data[k-1].c>0?data[k-1].c:data[k].c;
+    const tr=Math.max(hi-lo,Math.abs(hi-pc),Math.abs(lo-pc));
+    sum+=tr; cnt++;
+  }
+  const atr=sum/cnt;
+  return data[i].c>0?(atr/data[i].c)*100:0;
+}
+
+function avgValueRub(data,i,win=LIQ_AVG_WIN){
+  let s=0,cnt=0;
+  for(let k=Math.max(0,i-win+1);k<=i;k++){
+    if(data[k].c>0&&data[k].v>0){s+=data[k].c*data[k].v;cnt++}
+  }
+  return cnt>0?s/cnt:0;
+}
+
+function dayRet(data,i){
+  if(i>0&&data[i-1].c>0) return (data[i].c/data[i-1].c-1)*100;
+  if(data[i].o>0) return (data[i].c/data[i].o-1)*100;
+  return 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SIGNAL DETECTION
+   ═══════════════════════════════════════════════════════════════════════ */
+function getTier(vr, cfg){
+  if(vr>=7.0 && cfg.tierUltra) return TIERS[0];
+  if(vr>=6.5 && cfg.tierStrong) return TIERS[1];
+  if(vr>=3.6 && cfg.tierBase) return TIERS[2];
+  return null;
+}
+
+function scanSignals(ticker, data, cfg, direction='long'){
+  const signals=[];
+  const costIn=cfg.commission+cfg.slippage;
+  const costOut=cfg.commission+cfg.slippage;
+  const maxVrCap=cfg.maxVr;
+  let consec=0;
+  let i=0;
+
+  while(i<data.length-1){
+    const av=avgVol(data,i);
+    if(!av){consec=0;i++;continue}
+    const vr=data[i].v/av;
+
+    if(vr>=3.6) consec++; else consec=0;
+    if(consec<1){i++;continue}
+
+    // VR cap filter
+    if(maxVrCap<999 && vr>maxVrCap){i++;continue}
+
+    const tier=getTier(vr,cfg);
+    if(!tier){i++;continue}
+
+    const atr=atrPct(data,i);
+    if(atr<1.5){i++;continue}
+
+    const m50=ma50(data,i);
+    if(m50===null){i++;continue}
+
+    const cp=closePos(data[i]);
+    const dr=dayRet(data,i);
+
+    if(direction==='long'){
+      if(data[i].c<=m50){i++;continue}
+      if(data[i].c<=data[i].o){i++;continue}
+      if(cp<0.45){i++;continue}
+      if(dr>10){i++;continue}
+    } else {
+      if(data[i].c>=m50){i++;continue}
+      if(data[i].c>=data[i].o){i++;continue}
+      if(cp>0.35){i++;continue}
+      if(dr<-10){i++;continue}
+      const liq=avgValueRub(data,i);
+      if(liq<SHORT_LIQ_MIN){i++;continue}
+    }
+
+    // T+1 entry confirmation
+    const ei=i+1;
+    if(ei>=data.length){i++;continue}
+    const avE=avgVol(data,ei);
+    if(!avE){i++;continue}
+    const vrE=data[ei].v/avE;
+    if(vrE<2.0){i++;continue}
+
+    const rawEP=data[ei].c>0?data[ei].c:data[ei].o;
+    const ep=direction==='long'?rawEP*(1+costIn):rawEP*(1-costIn);
+    const catStopPx=direction==='long'?ep*(1-cfg.stopPct/100):ep*(1+cfg.stopPct/100);
+    const liqAvg=avgValueRub(data,i);
+    const isLiq=liqAvg>=LIQ;
+
+    signals.push({
+      ticker, signalIdx:i, entryIdx:ei,
+      signalDate:data[i].d, entryDate:data[ei].d,
+      vr, vrEntry:vrE, tier, atr20:atr,
+      ep, catStopPx, costOut,
+      liqAvg, isLiquid:isLiq,
+      direction, cp, dayRetPct:dr,
+    });
+
+    // Skip to next potential signal after this trade completes
+    // Simulate trade to find exitIdx
+    const exitIdx=simulateTradeExit(data, ei, ep, catStopPx, tier, direction);
+    consec=0;
+    i=exitIdx;
+  }
+  return signals;
+}
+
+function simulateTradeExit(data, entryIdx, ep, catStopPx, tier, direction){
+  let peak=ep, trough=ep;
+  for(let j=entryIdx+1;j<data.length;j++){
+    const held=j-entryIdx;
+    if(direction==='long'){
+      if(data[j].l<=catStopPx) return j;
+      if(held>=tier.tsAfter){
+        const tsPx=peak*(1-tier.tsDist/100);
+        if(data[j].l<=tsPx) return j;
+      }
+      if(data[j].h>peak) peak=data[j].h;
+    } else {
+      if(data[j].h>=catStopPx) return j;
+      if(held>=tier.tsAfter){
+        const tsPx=trough*(1+tier.tsDist/100);
+        if(data[j].h>=tsPx) return j;
+      }
+      if(data[j].l<trough) trough=data[j].l;
+    }
+    if(held>=tier.maxHold) return j;
+  }
+  return data.length-1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PORTFOLIO SIMULATION
+   ═══════════════════════════════════════════════════════════════════════ */
+function buildPriceMap(tickerData){
+  // {ticker: {date: {o,c,h,l,v}}}
+  const map={};
+  for(const [tk,bars] of Object.entries(tickerData)){
+    map[tk]={};
+    for(const b of bars) map[tk][b.d]=b;
+  }
+  return map;
+}
+
+function buildDateList(tickerData, startDate){
+  const dset=new Set();
+  for(const bars of Object.values(tickerData)){
+    for(const b of bars) if(b.d>=startDate) dset.add(b.d);
+  }
+  return [...dset].sort();
+}
+
+function simulateStrategy(signals, priceMap, dates, maxPos, cfg, stratName){
+  const costOut=cfg.commission+cfg.slippage;
+  const rebalFrac=cfg.rebal==='half'?0.5:cfg.rebal==='quarter'?0.25:0;
+
+  // Group signals by entryDate
+  const sigByDate={};
+  for(const s of signals){
+    if(!sigByDate[s.entryDate]) sigByDate[s.entryDate]=[];
+    sigByDate[s.entryDate].push(s);
+  }
+  // Sort each day's signals by VR desc
+  for(const d of Object.keys(sigByDate)){
+    sigByDate[d].sort((a,b)=>b.vr-a.vr||a.ticker.localeCompare(b.ticker));
+  }
+
+  let cash=1.0;
+  const positions=[];
+  const trades=[];
+  const equity=[]; // {d, eq}
+  let lastActivity=null;
+
+  for(const d of dates){
+    // --- Step 1: Check exits ---
+    const toClose=[];
+    for(let p=positions.length-1;p>=0;p--){
+      const pos=positions[p];
+      const bar=priceMap[pos.ticker]?.[d];
+      if(!bar){
+        // Use last known price for mark, skip exit checks
+        pos.lastPx=pos.lastPx||pos.ep;
+        continue;
+      }
+      pos.lastPx=bar.c;
+      pos.held++;
+
+      let exitPrice=null, reason=null;
+
+      if(pos.direction==='long'){
+        // Cat stop
+        if(bar.l<=pos.catStopPx){exitPrice=pos.catStopPx;reason='cat_stop'}
+        // Trailing stop
+        if(!exitPrice && pos.held>=pos.tier.tsAfter){
+          const tsPx=pos.peak*(1-pos.tier.tsDist/100);
+          if(bar.l<=tsPx){exitPrice=tsPx;reason='ts_extend'}
+        }
+        // Update peak AFTER checks
+        if(bar.h>pos.peak) pos.peak=bar.h;
+        // Max hold
+        if(!exitPrice && pos.held>=pos.tier.maxHold){exitPrice=bar.c;reason='max_hold'}
+      } else {
+        if(bar.h>=pos.catStopPx){exitPrice=pos.catStopPx;reason='cat_stop'}
+        if(!exitPrice && pos.held>=pos.tier.tsAfter){
+          const tsPx=pos.trough*(1+pos.tier.tsDist/100);
+          if(bar.h>=tsPx){exitPrice=tsPx;reason='ts_extend'}
+        }
+        if(bar.l<pos.trough) pos.trough=bar.l;
+        if(!exitPrice && pos.held>=pos.tier.maxHold){exitPrice=bar.c;reason='max_hold'}
+      }
+
+      if(exitPrice!==null){
+        const finalExit=pos.direction==='long'?exitPrice*(1-costOut):exitPrice*(1+costOut);
+        const ret=pos.direction==='long'?(finalExit/pos.ep-1)*100:(pos.ep/finalExit-1)*100;
+        cash+=pos.qty*finalExit;
+        trades.push({
+          ticker:pos.ticker, direction:pos.direction, tier:pos.tier.name,
+          vr:pos.vr, atr20:pos.atr20, strategy:stratName,
+          signalDate:pos.signalDate, entryDate:pos.entryDate, exitDate:d,
+          ep:pos.ep, exitPrice:finalExit, ret, reason,
+          held:pos.held, liqAvg:pos.liqAvg,
+        });
+        toClose.push(p);
+        lastActivity=d;
+      }
+    }
+    for(const idx of toClose.sort((a,b)=>b-a)) positions.splice(idx,1);
+
+    // --- Step 2: Process new entries ---
+    const daySigs=sigByDate[d];
+    if(daySigs && daySigs.length){
+      const candidates=[...daySigs];
+
+      // Rebalancing: if 1 position and new candidate
+      if(rebalFrac>0 && positions.length===1 && candidates.length>0){
+        const existing=positions[0];
+        const bar=priceMap[existing.ticker]?.[d];
+        if(bar){
+          const markPx=existing.direction==='long'?bar.c*(1-costOut):bar.c*(1+costOut);
+          const sellQty=existing.qty*rebalFrac;
+          cash+=sellQty*markPx;
+          const partRet=existing.direction==='long'?(markPx/existing.ep-1)*100:(existing.ep/markPx-1)*100;
+          trades.push({
+            ticker:existing.ticker, direction:existing.direction, tier:existing.tier.name,
+            vr:existing.vr, atr20:existing.atr20, strategy:stratName,
+            signalDate:existing.signalDate, entryDate:existing.entryDate, exitDate:d,
+            ep:existing.ep, exitPrice:markPx, ret:partRet, reason:'rebalance_half',
+            held:existing.held, liqAvg:existing.liqAvg,
+          });
+          existing.qty*=(1-rebalFrac);
+        }
+      }
+
+      // ATR rotation: if full, try replacing weakest
+      while(positions.length>=maxPos && candidates.length>0){
+        // Best candidate by ATR
+        candidates.sort((a,b)=>b.atr20-a.atr20||b.vr-a.vr);
+        const cand=candidates[0];
+        // Weakest position by ATR
+        let weakIdx=-1, weakATR=Infinity;
+        for(let p=0;p<positions.length;p++){
+          const pa=positions[p].currentATR||positions[p].atr20;
+          if(pa<weakATR){weakATR=pa;weakIdx=p}
+        }
+        if(weakIdx>=0 && cand.atr20>=weakATR*1.5 && cand.atr20-weakATR>=0.5){
+          const weak=positions[weakIdx];
+          const bar=priceMap[weak.ticker]?.[d];
+          const markPx=bar?bar.c:weak.lastPx||weak.ep;
+          const finalExit=weak.direction==='long'?markPx*(1-costOut):markPx*(1+costOut);
+          const ret=weak.direction==='long'?(finalExit/weak.ep-1)*100:(weak.ep/finalExit-1)*100;
+          cash+=weak.qty*finalExit;
+          trades.push({
+            ticker:weak.ticker, direction:weak.direction, tier:weak.tier.name,
+            vr:weak.vr, atr20:weak.atr20, strategy:stratName,
+            signalDate:weak.signalDate, entryDate:weak.entryDate, exitDate:d,
+            ep:weak.ep, exitPrice:finalExit, ret, reason:'rotate_atr20',
+            held:weak.held, liqAvg:weak.liqAvg,
+          });
+          positions.splice(weakIdx,1);
+          lastActivity=d;
+        } else {
+          break; // No rotation possible
+        }
+      }
+
+      // Enter new positions
+      if(positions.length<maxPos && candidates.length>0){
+        const slotsAvail=maxPos-positions.length;
+        const toEnter=candidates.slice(0,slotsAvail);
+        // VR-weighted sizing
+        const budget=cash;
+        if(budget>0 && toEnter.length>0){
+          const weights=toEnter.map(s=>Math.min(s.vr/3,3));
+          const wSum=weights.reduce((a,b)=>a+b,0);
+          for(let k=0;k<toEnter.length;k++){
+            const s=toEnter[k];
+            const stake=budget*(weights[k]/wSum);
+            const qty=stake/s.ep;
+            if(qty<=0) continue;
+            cash-=qty*s.ep;
+            positions.push({
+              ticker:s.ticker, direction:s.direction,
+              ep:s.ep, catStopPx:s.catStopPx,
+              tier:s.tier, vr:s.vr, atr20:s.atr20,
+              peak:s.ep, trough:s.ep,
+              held:0, qty,
+              signalDate:s.signalDate, entryDate:s.entryDate,
+              liqAvg:s.liqAvg, lastPx:s.ep, currentATR:s.atr20,
+            });
+            lastActivity=d;
+          }
+        }
+      }
+    }
+
+    // --- Step 3: Equity ---
+    let openVal=0;
+    for(const pos of positions){
+      const bar=priceMap[pos.ticker]?.[d];
+      const px=bar?bar.c:pos.lastPx||pos.ep;
+      pos.lastPx=px;
+      openVal+=pos.qty*px;
+    }
+    equity.push({d, eq:(cash+openVal)*100});
+  }
+
+  // Close remaining positions at last day
+  const lastDate=dates[dates.length-1];
+  for(const pos of positions){
+    const bar=priceMap[pos.ticker]?.[lastDate];
+    const px=bar?bar.c:pos.lastPx||pos.ep;
+    const finalExit=pos.direction==='long'?px*(1-costOut):px*(1+costOut);
+    const ret=pos.direction==='long'?(finalExit/pos.ep-1)*100:(pos.ep/finalExit-1)*100;
+    trades.push({
+      ticker:pos.ticker, direction:pos.direction, tier:pos.tier.name,
+      vr:pos.vr, atr20:pos.atr20, strategy:stratName,
+      signalDate:pos.signalDate, entryDate:pos.entryDate, exitDate:lastDate,
+      ep:pos.ep, exitPrice:finalExit, ret, reason:'end_of_data',
+      held:pos.held, liqAvg:pos.liqAvg,
+    });
+  }
+
+  return {trades, equity, lastActivity};
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SHORT MODES (hedge/constant/silence applied to combined equity)
+   ═══════════════════════════════════════════════════════════════════════ */
+function applyShortMode(equityCurve, imoexData, cfg, lastActivities){
+  if(cfg.shortMode==='off') return equityCurve;
+
+  // Build IMOEX map: date→close
+  const im={};
+  for(const b of imoexData) im[b.d]=b.c;
+  const imoexDates=imoexData.map(b=>b.d).sort();
+
+  // MA200 for IMOEX
+  const imoexMA200={};
+  for(let i=0;i<imoexData.length;i++){
+    if(i<199) continue;
+    let s=0;
+    for(let k=i-199;k<=i;k++) s+=imoexData[k].c;
+    imoexMA200[imoexData[i].d]=s/200;
+  }
+
+  const costIn=cfg.commission+cfg.slippage;
+  const costOut=cfg.commission+cfg.slippage;
+  const result=[];
+  let prevEq=null, prevIm=null;
+  let inHedge=false;
+
+  // For silence mode: track last activity across all strategies
+  let lastAct=null;
+  if(lastActivities){
+    for(const la of lastActivities) if(la && (!lastAct || la>lastAct)) lastAct=la;
+  }
+  let silenceDays=0;
+  let inSilenceHedge=false;
+
+  for(let i=0;i<equityCurve.length;i++){
+    const {d}=equityCurve[i];
+    let eq=equityCurve[i].eq;
+    const imC=im[d];
+    const imPrev=prevIm;
+
+    if(imC && imPrev && prevEq){
+      const imRet=imC/imPrev-1;
+
+      if(cfg.shortMode==='hedge'){
+        const ma=imoexMA200[d];
+        const nowHedge=ma && imC<ma;
+        if(nowHedge && !inHedge) eq=prevEq*(1-costIn/100); // enter hedge
+        if(!nowHedge && inHedge) eq=prevEq*(1-costOut/100); // exit hedge
+        if(nowHedge){
+          const ratio=eq/prevEq || 1;
+          eq=eq*(1-imRet*0.5-BORROW_COST_DAILY);
+        }
+        inHedge=nowHedge;
+      }
+      else if(cfg.shortMode==='constant'){
+        eq=eq*(1-imRet*1.0-BORROW_COST_DAILY);
+      }
+      else if(cfg.shortMode==='silence'){
+        // Count days since last activity
+        if(d>lastAct) silenceDays++; else silenceDays=0;
+        const nowSilence=silenceDays>=cfg.silenceDays;
+        if(nowSilence && !inSilenceHedge) eq=prevEq*(1-costIn/100);
+        if(!nowSilence && inSilenceHedge) eq=prevEq*(1-costOut/100);
+        if(nowSilence){
+          eq=eq*(1-imRet*0.5-BORROW_COST_DAILY);
+        }
+        inSilenceHedge=nowSilence;
+      }
+    }
+
+    result.push({d, eq});
+    prevEq=eq;
+    if(imC) prevIm=imC;
+  }
+  return result;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PAIR HEDGE (applied per-trade)
+   ═══════════════════════════════════════════════════════════════════════ */
+function applyPairHedge(trades, priceMap, cfg){
+  const costTotal=2*(cfg.commission+cfg.slippage);
+  for(const t of trades){
+    if(t.direction!=='long') continue;
+    const peer=SECTOR_MAP[t.ticker]||DEFAULT_PAIR;
+    const peerPrices=priceMap[peer];
+    if(!peerPrices) continue;
+    const entryBar=peerPrices[t.entryDate];
+    const exitBar=peerPrices[t.exitDate];
+    if(!entryBar||!exitBar) continue;
+    const pairEntryPx=entryBar.c;
+    const pairExitPx=exitBar.c;
+    if(pairEntryPx<=0||pairExitPx<=0) continue;
+    const pairRet=(pairEntryPx/pairExitPx-1)*100-costTotal*100;
+    const borrowCost=BORROW_COST_ANNUAL/252*t.held*100;
+    t.pairReturn=pairRet-borrowCost;
+    t.netReturn=t.ret+t.pairReturn;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATISTICS
+   ═══════════════════════════════════════════════════════════════════════ */
+function computeStats(trades){
+  if(!trades.length) return null;
+  const rets=trades.map(t=>t.ret);
+  const wins=rets.filter(r=>r>0);
+  const losses=rets.filter(r=>r<=0);
+  const n=rets.length;
+  const avg=rets.reduce((a,b)=>a+b,0)/n;
+  const sorted=[...rets].sort((a,b)=>a-b);
+  const med=sorted[Math.floor(n/2)];
+  const wr=wins.length/n*100;
+  const grossProfit=wins.reduce((a,b)=>a+b,0);
+  const grossLoss=Math.abs(losses.reduce((a,b)=>a+b,0));
+  const pf=grossLoss>0?grossProfit/grossLoss:grossProfit>0?999:0;
+  const maxWin=Math.max(...rets);
+  const maxLoss=Math.min(...rets);
+  const avgWin=wins.length?grossProfit/wins.length:0;
+  const avgLoss=losses.length?grossLoss/losses.length:0;
+
+  // Consecutive wins/losses
+  let maxCW=0,maxCL=0,cw=0,cl=0;
+  for(const r of rets){
+    if(r>0){cw++;cl=0;if(cw>maxCW)maxCW=cw}
+    else{cl++;cw=0;if(cl>maxCL)maxCL=cl}
+  }
+
+  // Avg hold
+  const avgHold=trades.reduce((a,t)=>a+t.held,0)/n;
+
+  // Sharpe (simple)
+  const std=Math.sqrt(rets.reduce((a,r)=>a+(r-avg)**2,0)/n);
+  const sharpe=std>0?Math.max(-99,Math.min(99,(avg/std)*Math.sqrt(252/Math.max(1,avgHold)))):0;
+
+  return {n,avg,med,wr,pf,maxWin,maxLoss,avgWin,avgLoss,maxCW,maxCL,avgHold,sharpe,grossProfit,grossLoss};
+}
+
+function computeMaxDD(equity){
+  let peak=-Infinity, maxDD=0;
+  for(const {eq} of equity){
+    if(eq>peak) peak=eq;
+    const dd=(peak-eq)/peak*100;
+    if(dd>maxDD) maxDD=dd;
+  }
+  return maxDD;
+}
+
+function yearlyBreakdown(equity, cfg){
+  const years=[];
+  const byYear={};
+  for(const p of equity){
+    const y=+p.d.slice(0,4);
+    if(!byYear[y]) byYear[y]=[];
+    byYear[y].push(p);
+  }
+  for(const [y,pts] of Object.entries(byYear).sort((a,b)=>a[0]-b[0])){
+    const eqStart=pts[0].eq;
+    const eqEnd=pts[pts.length-1].eq;
+    const returnPct=(eqEnd/eqStart-1)*100;
+    const profitRub=cfg.capital*(returnPct/100);
+    const withdrawn=Math.max(0,profitRub);
+    years.push({year:+y,returnPct,profitRub,withdrawn,eqStart,eqEnd});
+  }
+  return years;
+}
+
+function oosAnalysis(trades, cfg){
+  const oosYear=cfg.oosYear;
+  const oosDate=`${oosYear}-01-01`;
+  const isTrades=trades.filter(t=>t.entryDate<oosDate);
+  const oosTrades=trades.filter(t=>t.entryDate>=oosDate);
+  const isS=computeStats(isTrades);
+  const oosS=computeStats(oosTrades);
+  let verdict='INSUFFICIENT';
+  if(oosS && oosS.n>=10 && isS){
+    if(oosS.wr>=isS.wr*0.85 && oosS.avg>=isS.avg*0.50) verdict='CONFIRMED';
+    else verdict='DEGRADING';
+  }
+  return {is:isS, oos:oosS, verdict, isN:isTrades.length, oosN:oosTrades.length};
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RENDERING
+   ═══════════════════════════════════════════════════════════════════════ */
+let charts={};
+
+function destroyCharts(){
+  for(const c of Object.values(charts)) if(c) c.destroy();
+  charts={};
+}
+
+function renderStats(stats, maxDD, totalReturn, allTrades){
+  const g=document.getElementById('statsGrid');
+  const cards=[
+    {lbl:'Сделок',val:stats.n,cls:''},
+    {lbl:'Win Rate',val:stats.wr.toFixed(1)+'%',cls:stats.wr>=50?'green':'red'},
+    {lbl:'Ср. доход',val:stats.avg.toFixed(2)+'%',cls:stats.avg>0?'green':'red'},
+    {lbl:'Медиана',val:stats.med.toFixed(2)+'%',cls:stats.med>0?'green':'red'},
+    {lbl:'Profit Factor',val:stats.pf.toFixed(2),cls:stats.pf>1?'green':'red'},
+    {lbl:'Sharpe',val:stats.sharpe.toFixed(2),cls:stats.sharpe>0?'green':'red'},
+    {lbl:'Max DD',val:maxDD.toFixed(1)+'%',cls:'red'},
+    {lbl:'Итого',val:totalReturn.toFixed(1)+'%',cls:totalReturn>0?'green':'red'},
+    {lbl:'Ср. удерж.',val:stats.avgHold.toFixed(1)+' д.',cls:''},
+    {lbl:'Макс. серия W/L',val:stats.maxCW+' / '+stats.maxCL,cls:''},
+  ];
+  g.innerHTML=cards.map(c=>`<div class="stat-card ${c.cls}"><div class="lbl">${c.lbl}</div><div class="val">${c.val}</div></div>`).join('');
+}
+
+function renderEquityChart(equities, benchData, cfg){
+  const ctx=document.getElementById('chartEquity').getContext('2d');
+  const datasets=[];
+  const colors=['#e94560','#00b894','#0984e3','#6c5ce7'];
+  let i=0;
+  for(const [name,eq] of Object.entries(equities)){
+    datasets.push({
+      label:name, data:eq.map(p=>({x:p.d,y:p.eq})),
+      borderColor:colors[i%colors.length], borderWidth:1.5,
+      pointRadius:0, fill:false, tension:0.1,
+    });
+    i++;
+  }
+  // Benchmark
+  if(benchData.length){
+    const bStart=benchData[0].c;
+    datasets.push({
+      label:'Benchmark', data:benchData.map(p=>({x:p.d,y:p.c/bStart*100})),
+      borderColor:'#636e72', borderWidth:1, borderDash:[4,4],
+      pointRadius:0, fill:false,
+    });
+  }
+  // OOS line
+  const oosDate=`${cfg.oosYear}-01-01`;
+
+  charts.equity=new Chart(ctx,{
+    type:'line',
+    data:{datasets},
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#eee',font:{size:11}}},
+        annotation:undefined},
+      scales:{
+        x:{type:'category',ticks:{color:'#999',maxTicksLimit:12,font:{size:10}},grid:{color:'#2a2a4a'}},
+        y:{ticks:{color:'#999',font:{size:10}},grid:{color:'#2a2a4a'}},
+      },
+    }
+  });
+}
+
+function renderYearsChart(yearly){
+  const ctx=document.getElementById('chartYears').getContext('2d');
+  charts.years=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:yearly.map(y=>y.year),
+      datasets:[
+        {label:'Доходность %', data:yearly.map(y=>y.returnPct), backgroundColor:yearly.map(y=>y.returnPct>=0?'#00b894':'#e17055'), yAxisID:'y'},
+        {label:'Прибыль ₽', data:yearly.map(y=>y.profitRub), backgroundColor:'rgba(9,132,227,0.5)', yAxisID:'y1'},
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#eee',font:{size:11}}}},
+      scales:{
+        x:{ticks:{color:'#999'},grid:{color:'#2a2a4a'}},
+        y:{position:'left',ticks:{color:'#999',callback:v=>v+'%'},grid:{color:'#2a2a4a'}},
+        y1:{position:'right',ticks:{color:'#999',callback:v=>(v/1000).toFixed(0)+'k'},grid:{display:false}},
+      }
+    }
+  });
+}
+
+function renderDistChart(trades){
+  const rets=trades.map(t=>t.ret);
+  const bins={};
+  const step=2;
+  for(const r of rets){
+    const b=Math.floor(r/step)*step;
+    bins[b]=(bins[b]||0)+1;
+  }
+  const labels=Object.keys(bins).sort((a,b)=>+a-+b);
+  const ctx=document.getElementById('chartDist').getContext('2d');
+  charts.dist=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:labels.map(l=>`${l}..${+l+step}%`),
+      datasets:[{data:labels.map(l=>bins[l]),backgroundColor:labels.map(l=>+l>=0?'#00b894':'#e17055')}]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{ticks:{color:'#999',font:{size:9}},grid:{color:'#2a2a4a'}},
+        y:{ticks:{color:'#999'},grid:{color:'#2a2a4a'}},
+      }
+    }
+  });
+}
+
+function renderMonthlyChart(trades){
+  const byMonth=Array.from({length:12},()=>({sum:0,wins:0,n:0}));
+  for(const t of trades){
+    const m=+t.entryDate.slice(5,7)-1;
+    byMonth[m].sum+=t.ret;
+    byMonth[m].n++;
+    if(t.ret>0) byMonth[m].wins++;
+  }
+  const months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+  const ctx=document.getElementById('chartMonthly').getContext('2d');
+  charts.monthly=new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:months,
+      datasets:[
+        {label:'Ср. доход %', data:byMonth.map(m=>m.n?m.sum/m.n:0), backgroundColor:byMonth.map(m=>m.n&&m.sum/m.n>=0?'#00b894':'#e17055'), yAxisID:'y'},
+        {label:'WR %', data:byMonth.map(m=>m.n?m.wins/m.n*100:0), type:'line', borderColor:'#e94560', borderWidth:2, pointRadius:3, yAxisID:'y1'},
+      ]
+    },
+    options:{
+      responsive:true, maintainAspectRatio:false,
+      plugins:{legend:{labels:{color:'#eee',font:{size:11}}}},
+      scales:{
+        x:{ticks:{color:'#999'},grid:{color:'#2a2a4a'}},
+        y:{position:'left',ticks:{color:'#999'},grid:{color:'#2a2a4a'}},
+        y1:{position:'right',min:0,max:100,ticks:{color:'#999',callback:v=>v+'%'},grid:{display:false}},
+      }
+    }
+  });
+}
+
+function renderOOS(oos, cfg){
+  const box=document.getElementById('oosBox');
+  const verdictCls=oos.verdict==='CONFIRMED'?'confirmed':oos.verdict==='DEGRADING'?'degrading':'insufficient';
+  const fmt=(s,key)=>s?s[key].toFixed(2):'—';
+  box.innerHTML=`
+    <h3>Walk-Forward: IS / OOS (граница ${cfg.oosYear})</h3>
+    <span class="verdict verdict-${verdictCls}">${oos.verdict}</span>
+    <table style="margin-top:12px">
+      <thead><tr><th>Метрика</th><th>IS (n=${oos.isN})</th><th>OOS (n=${oos.oosN})</th><th>Δ</th></tr></thead>
+      <tbody>
+        <tr><td>Win Rate %</td><td>${fmt(oos.is,'wr')}</td><td>${fmt(oos.oos,'wr')}</td><td>${oos.is&&oos.oos?(oos.oos.wr-oos.is.wr).toFixed(2):''}</td></tr>
+        <tr><td>Avg Return %</td><td>${fmt(oos.is,'avg')}</td><td>${fmt(oos.oos,'avg')}</td><td>${oos.is&&oos.oos?(oos.oos.avg-oos.is.avg).toFixed(2):''}</td></tr>
+        <tr><td>Median %</td><td>${fmt(oos.is,'med')}</td><td>${fmt(oos.oos,'med')}</td><td>${oos.is&&oos.oos?(oos.oos.med-oos.is.med).toFixed(2):''}</td></tr>
+        <tr><td>PF</td><td>${fmt(oos.is,'pf')}</td><td>${fmt(oos.oos,'pf')}</td><td>${oos.is&&oos.oos?(oos.oos.pf-oos.is.pf).toFixed(2):''}</td></tr>
+        <tr><td>Max Win %</td><td>${fmt(oos.is,'maxWin')}</td><td>${fmt(oos.oos,'maxWin')}</td><td></td></tr>
+        <tr><td>Max Loss %</td><td>${fmt(oos.is,'maxLoss')}</td><td>${fmt(oos.oos,'maxLoss')}</td><td></td></tr>
+      </tbody>
+    </table>`;
+}
+
+function renderYearsTable(yearly){
+  const tbl=document.getElementById('tblYears');
+  tbl.querySelector('thead').innerHTML='<tr><th>Год</th><th>Доходность %</th><th>Прибыль ₽</th><th>Снято ₽</th></tr>';
+  tbl.querySelector('tbody').innerHTML=yearly.map(y=>`
+    <tr>
+      <td>${y.year}</td>
+      <td class="${y.returnPct>=0?'pos':'neg'}">${y.returnPct.toFixed(2)}%</td>
+      <td class="${y.profitRub>=0?'pos':'neg'}">${y.profitRub.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}</td>
+      <td>${y.withdrawn.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,' ')}</td>
+    </tr>`).join('');
+}
+
+function renderTradesTable(trades){
+  const tbl=document.getElementById('tblTrades');
+  tbl.querySelector('thead').innerHTML=`<tr>
+    <th>#</th><th>Тикер</th><th>Напр.</th><th>Стратегия</th><th>Tier</th>
+    <th>VR</th><th>ATR%</th><th>Сигнал</th><th>Вход</th><th>Выход</th>
+    <th>Цена входа</th><th>Цена выхода</th><th>Доход %</th><th>Удерж.</th><th>Причина</th>
+  </tr>`;
+  const tierTag=t=>`<span class="tag tag-${t.toLowerCase()}">${t}</span>`;
+  tbl.querySelector('tbody').innerHTML=trades.map((t,i)=>`
+    <tr>
+      <td>${i+1}</td><td><b>${t.ticker}</b></td>
+      <td>${t.direction==='long'?'🟢 L':'🔴 S'}</td>
+      <td>${t.strategy}</td><td>${tierTag(t.tier)}</td>
+      <td>${t.vr.toFixed(1)}</td><td>${t.atr20.toFixed(1)}</td>
+      <td>${t.signalDate}</td><td>${t.entryDate}</td><td>${t.exitDate}</td>
+      <td>${t.ep.toFixed(2)}</td><td>${t.exitPrice.toFixed(2)}</td>
+      <td class="${t.ret>=0?'pos':'neg'}">${t.ret.toFixed(2)}%</td>
+      <td>${t.held}д</td><td>${t.reason}</td>
+    </tr>`).join('');
+}
+
+function exportCSV(trades){
+  const headers=['#','Ticker','Direction','Strategy','Tier','VR','ATR%','Signal','Entry','Exit','EntryPx','ExitPx','Return%','Held','Reason'];
+  const rows=trades.map((t,i)=>[i+1,t.ticker,t.direction,t.strategy,t.tier,t.vr.toFixed(2),t.atr20.toFixed(2),t.signalDate,t.entryDate,t.exitDate,t.ep.toFixed(2),t.exitPrice.toFixed(2),t.ret.toFixed(2),t.held,t.reason]);
+  const csv=[headers,...rows].map(r=>r.join(',')).join('\n');
+  const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='backtest_v6_trades.csv';
+  a.click();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MAIN
+   ═══════════════════════════════════════════════════════════════════════ */
+async function runBacktest(){
+  const cfg=readCfg();
+  const btn=document.getElementById('btnRun');
+  btn.disabled=true;
+  document.getElementById('results').classList.add('hidden');
+  destroyCharts();
+
+  try{
+    // Load data
+    const {tickerData, bench, imoex}=await loadAllData(cfg);
+    const priceMap=buildPriceMap(tickerData);
+    const startDate=`${cfg.startYear}-01-01`;
+    const dates=buildDateList(tickerData, startDate);
+
+    progress('Сканирование сигналов...',88);
+
+    // Scan signals for all tickers
+    const allLongSignals=[];
+    const allShortSignals=[];
+    const tickers=Object.keys(tickerData);
+
+    for(const tk of tickers){
+      const data=tickerData[tk];
+      // Only consider bars from startYear onwards for signals
+      const sigs=scanSignals(tk, data, cfg, 'long');
+      for(const s of sigs){
+        if(s.entryDate>=startDate) allLongSignals.push(s);
+      }
+      if(cfg.shortMode==='mirror'){
+        const shorts=scanSignals(tk, data, cfg, 'short');
+        for(const s of shorts){
+          if(s.entryDate>=startDate) allShortSignals.push(s);
+        }
+      }
+    }
+
+    // Sort: entryDate asc, VR desc, ticker asc
+    const sortSigs=arr=>arr.sort((a,b)=>a.entryDate.localeCompare(b.entryDate)||b.vr-a.vr||a.ticker.localeCompare(b.ticker));
+    sortSigs(allLongSignals);
+    sortSigs(allShortSignals);
+
+    // Split into S1 (liquid) and S2 (illiquid)
+    const s1Sigs=allLongSignals.filter(s=>s.isLiquid);
+    const s2Sigs=allLongSignals.filter(s=>!s.isLiquid);
+
+    progress('Симуляция портфеля S1...',90);
+    const s1=simulateStrategy(s1Sigs, priceMap, dates, cfg.maxPos1, cfg, 'S1');
+
+    progress('Симуляция портфеля S2...',93);
+    const s2=simulateStrategy(s2Sigs, priceMap, dates, cfg.maxPos2, cfg, 'S2');
+
+    // Mirror shorts (S3)
+    let s3=null;
+    if(cfg.shortMode==='mirror'){
+      progress('Симуляция портфеля S3 (mirror shorts)...',95);
+      s3=simulateStrategy(allShortSignals, priceMap, dates, cfg.maxPosShort, cfg, 'S3');
+    }
+
+    // Combine equity
+    progress('Расчёт результатов...',97);
+    const equities={};
+    equities['S1']=s1.equity;
+    equities['S2']=s2.equity;
+
+    // Combined equity
+    const combined=[];
+    const divisor=s3?3:2;
+    for(let i=0;i<dates.length;i++){
+      const d=dates[i];
+      const e1=s1.equity[i]?.eq||100;
+      const e2=s2.equity[i]?.eq||100;
+      const e3=s3?s3.equity[i]?.eq||100:0;
+      const eq=s3?(e1+e2+e3)/divisor:(e1+e2)/2;
+      combined.push({d,eq});
+    }
+
+    if(s3) equities['S3']=s3.equity;
+
+    // Apply short mode to combined equity (hedge/constant/silence)
+    const lastActivities=[s1.lastActivity, s2.lastActivity];
+    const finalEquity=applyShortMode(combined, imoex, cfg, lastActivities);
+    equities['Combined']=finalEquity;
+
+    // All trades
+    let allTrades=[...s1.trades,...s2.trades];
+    if(s3) allTrades=[...allTrades,...s3.trades];
+    allTrades.sort((a,b)=>a.entryDate.localeCompare(b.entryDate));
+
+    // Pair hedge
+    if(cfg.shortMode==='pair') applyPairHedge(allTrades, priceMap, cfg);
+
+    // Statistics
+    const stats=computeStats(allTrades);
+    const maxDD=computeMaxDD(finalEquity);
+    const totalReturn=finalEquity.length?(finalEquity[finalEquity.length-1].eq/finalEquity[0].eq-1)*100:0;
+    const yearly=yearlyBreakdown(finalEquity, cfg);
+    const oos=oosAnalysis(allTrades, cfg);
+
+    // Filter benchmark to our date range
+    const benchFiltered=bench.filter(b=>b.d>=startDate);
+
+    // Render
+    document.getElementById('results').classList.remove('hidden');
+    renderStats(stats, maxDD, totalReturn, allTrades);
+    renderEquityChart(equities, benchFiltered, cfg);
+    renderYearsChart(yearly);
+    renderDistChart(allTrades);
+    renderMonthlyChart(allTrades);
+    renderOOS(oos, cfg);
+    renderYearsTable(yearly);
+    renderTradesTable(allTrades);
+
+    document.getElementById('btnCsv').onclick=()=>exportCSV(allTrades);
+
+    progress(`Готово! ${allTrades.length} сделок, ${Object.keys(tickerData).length} тикеров`,100);
+
+  }catch(e){
+    progress('Ошибка: '+e.message,0);
+    console.error(e);
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+document.getElementById('btnRun').addEventListener('click', runBacktest);
+</script>
+</body>
+</html>
