@@ -1210,7 +1210,7 @@ function exportCSV(trades,cfg,stats,maxDD,totalReturn,equity){
   p('Sharpe',stats.sharpe.toFixed(2));
   p('Макс просадка %',maxDD.toFixed(2));
   p('Общая доходность %',totalReturn.toFixed(2));
-  const years=(equity.length>1)?(new Date(equity[equity.length-1].d)-new Date(equity[0].d))/365.25/1000:1;
+  const years=(equity.length>1)?(new Date(equity[equity.length-1].d)-new Date(equity[0].d))/(365.25*24*60*60*1000):1;
   const cagr=years>0?((equity[equity.length-1].eq/equity[0].eq)**(1/years)-1)*100:0;
   p('CAGR %',cagr.toFixed(2));
   p('Макс выигрыш %',stats.maxWin.toFixed(2));
