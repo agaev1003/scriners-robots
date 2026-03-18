@@ -317,6 +317,8 @@ tr:hover td{background:rgba(233,69,96,0.05)}
   <div class="toolbar">
     <button class="btn" id="btnRun">▶ Запустить бэктест</button>
     <button class="btn btn-sm btn-outline" id="btnClearCache">Очистить кэш</button>
+    <button class="btn btn-sm btn-outline" id="btnLoadDiv" style="display:none" title="fetch не работает через file:// — загрузите вручную">📂 Загрузить dividends.json</button>
+    <input type="file" id="divFileInput" accept=".json" style="display:none">
     <span class="cache-info" id="cacheInfo"></span>
   </div>
 
@@ -377,30 +379,47 @@ const MIN_BARS = 100;
 let DIV_EXDATES = {};
 let DIV_LOADED = false;
 
+function parseDividendData(data){
+  const divs=data.dividends||{};
+  DIV_EXDATES={};
+  for(const [ticker,records] of Object.entries(divs)){
+    const dates=new Set();
+    for(const rec of records){
+      if(rec.record) dates.add(rec.record);
+    }
+    if(dates.size>0) DIV_EXDATES[ticker]=dates;
+  }
+  DIV_LOADED=true;
+  console.log(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров`);
+}
+
 async function loadDividendData(){
   if(DIV_LOADED) return;
+  // Try fetch first (works on http://, fails on file://)
   try{
     const r=await fetch('dividends.json');
     if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    const data=await r.json();
-    const divs=data.dividends||{};
-    DIV_EXDATES={};
-    for(const [ticker,records] of Object.entries(divs)){
-      const dates=new Set();
-      for(const rec of records){
-        // registryclosedate from MOEX = record date = ex-date
-        // Price drops on this day (T+2 settlement, buyer on T-1 gets dividend)
-        if(rec.record) dates.add(rec.record);
-      }
-      if(dates.size>0) DIV_EXDATES[ticker]=dates;
-    }
-    DIV_LOADED=true;
-    console.log(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров`);
+    parseDividendData(await r.json());
+    return;
   }catch(e){
-    console.warn('dividends.json не найден — используется эвристика.',e.message);
-    DIV_EXDATES={};
-    DIV_LOADED=true;
+    console.warn('fetch dividends.json failed:',e.message);
   }
+  // Try loading from localStorage (previously uploaded via file input)
+  try{
+    const cached=localStorage.getItem('dividends_json');
+    if(cached){
+      parseDividendData(JSON.parse(cached));
+      console.log('Дивиденды загружены из localStorage');
+      return;
+    }
+  }catch(e){
+    console.warn('localStorage dividends failed:',e.message);
+  }
+  // Show manual upload button for file:// protocol
+  const btn=document.getElementById('btnLoadDiv');
+  if(btn) btn.style.display='';
+  DIV_EXDATES={};
+  DIV_LOADED=true;
 }
 
 function isKnownExDate(ticker,dateStr){
@@ -1218,6 +1237,27 @@ async function runBacktest(){
 document.getElementById('btnRun').addEventListener('click',runBacktest);
 document.getElementById('btnClearCache').addEventListener('click',()=>{
   cacheClear();updateCacheInfo();alert('Кэш очищен!');
+});
+// Manual dividends.json upload for file:// protocol
+document.getElementById('btnLoadDiv').addEventListener('click',()=>{
+  document.getElementById('divFileInput').click();
+});
+document.getElementById('divFileInput').addEventListener('change',(e)=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const data=JSON.parse(reader.result);
+      parseDividendData(data);
+      localStorage.setItem('dividends_json',reader.result);
+      document.getElementById('btnLoadDiv').style.display='none';
+      alert(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров. Сохранено в кэш — при следующем запуске загрузится автоматически.`);
+    }catch(err){
+      alert('Ошибка чтения dividends.json: '+err.message);
+    }
+  };
+  reader.readAsText(file);
 });
 updateCacheInfo();
 </script>
