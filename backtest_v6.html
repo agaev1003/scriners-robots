@@ -1152,12 +1152,89 @@ function renderTradesTable(trades){
     <td>${tr.held}</td><td>${tr.reason}</td></tr>`).join('');
 }
 
-function exportCSV(trades){
-  const h=['#','Ticker','Strategy','Tier','VR','ATR%','Signal','Entry','Exit','EP','ExitPx','Return%','Held','Reason'];
-  const rows=trades.map((t,i)=>[i+1,t.ticker,t.strategy,t.tier,t.vr.toFixed(2),t.atr20.toFixed(2),t.signalDate,t.entryDate,t.exitDate,t.ep.toFixed(2),t.exitPrice.toFixed(2),t.ret.toFixed(2),t.held,t.reason]);
-  const csv=[h,...rows].map(r=>r.join(',')).join('\n');
+function exportCSV(trades,cfg,stats,maxDD,totalReturn,equity){
+  const esc=v=>{const s=String(v??'');return s.includes(',')||s.includes('"')||s.includes('\n')?'"'+s.replace(/"/g,'""')+'"':s};
+  const lines=[];
+  const p=(label,val)=>lines.push([esc(label),esc(val)].join(','));
+
+  // --- Run parameters ---
+  lines.push('=== ПАРАМЕТРЫ ПРОГОНА ===');
+  p('Дата прогона',new Date().toISOString().slice(0,19));
+  p('Капитал',cfg.capital);
+  p('Старт',cfg.startYear);
+  p('OOS год',cfg.oosYear);
+  p('Макс позиций S1',cfg.maxPos1);
+  p('Макс позиций S2',cfg.maxPos2);
+  p('Комиссия %',(cfg.commission*100).toFixed(2));
+  p('Проскальзывание %',(cfg.slippage*100).toFixed(2));
+  p('Ребалансировка',cfg.rebal);
+  lines.push('');
+  lines.push('--- Сигнал ---');
+  p('Мин объём (млн)',cfg.liq/1e6);
+  p('Мин VR',cfg.volMin);
+  p('Макс VR',cfg.maxVr);
+  p('Дней сигнала',cfg.sigDays);
+  p('ATR мин %',cfg.atrMin);
+  p('ATR окно',cfg.atrWin);
+  p('MA период',cfg.maPeriod);
+  p('MA фильтр',cfg.maFilter);
+  p('Bull bar',cfg.bullBar?'да':'нет');
+  p('CP мин %',cfg.cpMin);
+  p('Макс дн. доходность %',cfg.maxDayRet);
+  p('VR подтверждение',cfg.vrConfirm);
+  p('Gap отмена %',cfg.gapCancel);
+  p('Vol окно',cfg.volWin);
+  lines.push('');
+  lines.push('--- Выход ---');
+  p('Стоп-лосс %',cfg.stopPct);
+  p('Див гэп %',cfg.divGap);
+  p('ROT множитель',cfg.rotMult);
+  p('ROT абс %',cfg.rotAbs);
+  lines.push('');
+  lines.push('--- Тиры ---');
+  for(const t of cfg.tiers){
+    p(`${t.name} minVR`,t.minVr);
+    p(`${t.name} maxHold`,t.maxHold);
+    p(`${t.name} TS after`,t.tsAfter);
+    p(`${t.name} TS dist %`,t.tsDist);
+  }
+
+  // --- Summary stats ---
+  lines.push('');
+  lines.push('=== ИТОГИ ===');
+  p('Всего сделок',stats.n);
+  p('Средняя доходность %',stats.avg.toFixed(2));
+  p('Медианная доходность %',stats.med.toFixed(2));
+  p('Win rate %',stats.wr.toFixed(1));
+  p('Profit factor',stats.pf.toFixed(2));
+  p('Sharpe',stats.sharpe.toFixed(2));
+  p('Макс просадка %',maxDD.toFixed(2));
+  p('Общая доходность %',totalReturn.toFixed(2));
+  const years=(equity.length>1)?(new Date(equity[equity.length-1].d)-new Date(equity[0].d))/365.25/1000:1;
+  const cagr=years>0?((equity[equity.length-1].eq/equity[0].eq)**(1/years)-1)*100:0;
+  p('CAGR %',cagr.toFixed(2));
+  p('Макс выигрыш %',stats.maxWin.toFixed(2));
+  p('Макс проигрыш %',stats.maxLoss.toFixed(2));
+  p('Ср. выигрыш %',stats.avgWin.toFixed(2));
+  p('Ср. проигрыш %',stats.avgLoss.toFixed(2));
+  p('Макс серия побед',stats.maxCW);
+  p('Макс серия потерь',stats.maxCL);
+  p('Ср. удержание дней',stats.avgHold.toFixed(1));
+  p('Период',`${equity[0]?.d||''} — ${equity[equity.length-1]?.d||''}`);
+
+  // --- Trades ---
+  lines.push('');
+  lines.push('=== СДЕЛКИ ===');
+  const h=['#','Ticker','Strategy','Tier','VR','ATR%','Signal','Entry','Exit','EntryPx','ExitPx','Return%','Held','Reason'];
+  lines.push(h.join(','));
+  for(let i=0;i<trades.length;i++){
+    const t=trades[i];
+    lines.push([i+1,esc(t.ticker),esc(t.strategy),esc(t.tier),t.vr.toFixed(2),t.atr20.toFixed(2),t.signalDate,t.entryDate,t.exitDate,t.ep.toFixed(2),t.exitPrice.toFixed(2),t.ret.toFixed(2),t.held,esc(t.reason)].join(','));
+  }
+
+  const csv=lines.join('\n');
   const blob=new Blob(['\ufeff'+csv],{type:'text/csv;charset=utf-8'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backtest_v6_trades.csv';a.click();
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`backtest_v6_${new Date().toISOString().slice(0,10)}.csv`;a.click();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -1222,7 +1299,7 @@ async function runBacktest(){
     renderYearsTable(yearly);
     renderTradesTable(allTrades);
 
-    document.getElementById('btnCsv').onclick=()=>exportCSV(allTrades);
+    document.getElementById('btnCsv').onclick=()=>exportCSV(allTrades,cfg,stats,maxDD,totalReturn,combined);
     progress(`Готово! ${allTrades.length} сделок, ${Object.keys(tickerData).length} тикеров`,100);
   }catch(e){
     progress('Ошибка: '+e.message,0);console.error(e);
