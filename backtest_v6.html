@@ -257,10 +257,10 @@ tr:hover td{background:rgba(233,69,96,0.05)}
         </div>
         <div class="field">
           <label>Дивидендный гэп % (fallback)</label><input id="cfgDivGap" type="number" value="3" step="0.5">
-          <span class="hint">Если загружен файл <b>dividends.json</b> (данные T-Bank API) — дивидендные гэпы определяются
-            точно по реальным ex-date каждого тикера. Этот параметр используется только как запасной вариант
-            для тикеров, по которым нет данных в файле.<br><br>
-            Эвристика: если дневное падение >= N%, объём не аномальный (VR < 2), и открытие ниже предыдущего закрытия —
+          <span class="hint">Если загружен файл <b>dividends.json</b> (данные MOEX ISS API) — дивидендные гэпы определяются
+            точно по реальным ex-date (registryclosedate) каждого тикера. Этот параметр используется только как
+            запасной вариант для тикеров, по которым нет данных в файле.<br><br>
+            Эвристика: если дневное падение >= N%, объём не аномальный (VR &lt; 2), и открытие ниже предыдущего закрытия —
             стопы на этот день НЕ проверяются. Для генерации dividends.json откройте <b>fetch_dividends.html</b>.</span>
         </div>
         <div class="field">
@@ -388,23 +388,16 @@ async function loadDividendData(){
     for(const [ticker,records] of Object.entries(divs)){
       const dates=new Set();
       for(const rec of records){
-        // ex-date = the trading day AFTER lastBuy (record date or next day after lastBuy)
-        // On MOEX, if you bought on lastBuy, you get dividend.
-        // The price drops on the NEXT trading day after lastBuy = record date.
-        // We use record date as the ex-date (price drop day)
+        // registryclosedate from MOEX = record date = ex-date
+        // Price drops on this day (T+2 settlement, buyer on T-1 gets dividend)
         if(rec.record) dates.add(rec.record);
-        else if(rec.lastBuy){
-          // Fallback: if no record date, use lastBuy (price drop is actually next day,
-          // but we check both lastBuy and the day after in isDivGap)
-          dates.add(rec.lastBuy);
-        }
       }
       if(dates.size>0) DIV_EXDATES[ticker]=dates;
     }
     DIV_LOADED=true;
     console.log(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров`);
   }catch(e){
-    console.warn('dividends.json не найден или ошибка загрузки — используется эвристика.',e.message);
+    console.warn('dividends.json не найден — используется эвристика.',e.message);
     DIV_EXDATES={};
     DIV_LOADED=true;
   }
