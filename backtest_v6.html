@@ -317,9 +317,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
   <div class="toolbar">
     <button class="btn" id="btnRun">▶ Запустить бэктест</button>
     <button class="btn btn-sm btn-outline" id="btnClearCache">Очистить кэш</button>
-    <button class="btn btn-sm btn-outline" id="btnLoadDiv" style="display:none" title="fetch не работает через file:// — загрузите вручную">📂 Загрузить dividends.json</button>
-    <input type="file" id="divFileInput" accept=".json" style="display:none">
-    <span class="cache-info" id="cacheInfo"></span>
+<span class="cache-info" id="cacheInfo"></span>
   </div>
 
   <div class="progress-bar" id="progressBox">
@@ -373,53 +371,47 @@ const BLACKLIST = new Set(['MOEX','IRAO','FEES']);
 const MIN_BARS = 100;
 
 /* ═══════════════════════════════════════════════════════════════════════
-   DIVIDEND DATA — loaded from dividends.json (T-Bank API export)
+   DIVIDEND DATA — loaded from MOEX ISS API
    ═══════════════════════════════════════════════════════════════════════ */
 // Global map: { ticker: Set<ex-date-string> }
 let DIV_EXDATES = {};
 let DIV_LOADED = false;
 
-function parseDividendData(data){
-  const divs=data.dividends||{};
-  DIV_EXDATES={};
-  for(const [ticker,records] of Object.entries(divs)){
-    const dates=new Set();
-    for(const rec of records){
-      if(rec.record) dates.add(rec.record);
+async function loadDividendsForTicker(ticker){
+  const cacheKey=`div_${ticker}`;
+  const cached=cacheGet(cacheKey);
+  if(cached) return cached;
+  await sem.acquire();
+  try{
+    const url=`${MOEX}/securities/${ticker}/dividends.json?iss.meta=off`;
+    const d=await fetchRetry(url);
+    const cols=d.dividends.columns, rows=d.dividends.data;
+    const ri=cols.indexOf('registryclosedate');
+    const dates=[];
+    for(const r of rows){
+      if(r[ri]) dates.push(r[ri]);
     }
-    if(dates.size>0) DIV_EXDATES[ticker]=dates;
-  }
-  DIV_LOADED=true;
-  console.log(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров`);
+    if(dates.length>0) cacheSet(cacheKey,dates);
+    return dates;
+  }catch(e){
+    console.warn(`Дивиденды ${ticker}: ошибка`,e.message);
+    return [];
+  }finally{sem.release()}
 }
 
-async function loadDividendData(){
-  if(DIV_LOADED) return;
-  // Try fetch first (works on http://, fails on file://)
-  try{
-    const r=await fetch('dividends.json');
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    parseDividendData(await r.json());
-    return;
-  }catch(e){
-    console.warn('fetch dividends.json failed:',e.message);
-  }
-  // Try loading from localStorage (previously uploaded via file input)
-  try{
-    const cached=localStorage.getItem('dividends_json');
-    if(cached){
-      parseDividendData(JSON.parse(cached));
-      console.log('Дивиденды загружены из localStorage');
-      return;
-    }
-  }catch(e){
-    console.warn('localStorage dividends failed:',e.message);
-  }
-  // Show manual upload button for file:// protocol
-  const btn=document.getElementById('btnLoadDiv');
-  if(btn) btn.style.display='';
+async function loadAllDividends(tickers,progressFn){
   DIV_EXDATES={};
+  let done=0;
+  const total=tickers.length;
+  const tasks=tickers.map(async tk=>{
+    const dates=await loadDividendsForTicker(tk);
+    if(dates.length>0) DIV_EXDATES[tk]=new Set(dates);
+    done++;
+    if(done%20===0||done===total) progressFn(done,total);
+  });
+  await Promise.all(tasks);
   DIV_LOADED=true;
+  console.log(`Дивиденды загружены с MOEX ISS: ${Object.keys(DIV_EXDATES).length} тикеров`);
 }
 
 function isKnownExDate(ticker,dateStr){
@@ -581,11 +573,14 @@ async function loadBenchmark(index,from,till){
 }
 
 async function loadAllData(cfg){
-  progress('Загрузка дивидендов и тикеров...',0);
-  await loadDividendData();
+  progress('Загрузка тикеров...',0);
   const tickers=await loadTickerList();
+  progress(`${tickers.length} тикеров. Загрузка дивидендов с MOEX...`,2);
+  await loadAllDividends(tickers,(done,total)=>{
+    progress(`Дивиденды: ${done}/${total}`,2+done/total*8);
+  });
   const divInfo=Object.keys(DIV_EXDATES).length;
-  progress(`${tickers.length} тикеров${divInfo?`, дивиденды: ${divInfo} тикеров`:' (dividends.json не найден — эвристика)'}. Загрузка свечей...`,5);
+  progress(`${tickers.length} тикеров, дивиденды: ${divInfo}. Загрузка свечей...`,10);
 
   const fromDate=`${cfg.startYear-1}-01-01`;
   const tickerData={};
@@ -600,7 +595,7 @@ async function loadAllData(cfg){
     }catch(e){}
     done++;
     if(done%10===0||done===total)
-      progress(`Свечи: ${done}/${total} (кэш: ${fromCache})`,5+done/total*70);
+      progress(`Свечи: ${done}/${total} (кэш: ${fromCache})`,10+done/total*65);
   });
   await Promise.all(tasks);
 
@@ -1237,27 +1232,6 @@ async function runBacktest(){
 document.getElementById('btnRun').addEventListener('click',runBacktest);
 document.getElementById('btnClearCache').addEventListener('click',()=>{
   cacheClear();updateCacheInfo();alert('Кэш очищен!');
-});
-// Manual dividends.json upload for file:// protocol
-document.getElementById('btnLoadDiv').addEventListener('click',()=>{
-  document.getElementById('divFileInput').click();
-});
-document.getElementById('divFileInput').addEventListener('change',(e)=>{
-  const file=e.target.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=()=>{
-    try{
-      const data=JSON.parse(reader.result);
-      parseDividendData(data);
-      localStorage.setItem('dividends_json',reader.result);
-      document.getElementById('btnLoadDiv').style.display='none';
-      alert(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров. Сохранено в кэш — при следующем запуске загрузится автоматически.`);
-    }catch(err){
-      alert('Ошибка чтения dividends.json: '+err.message);
-    }
-  };
-  reader.readAsText(file);
 });
 updateCacheInfo();
 </script>
