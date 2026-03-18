@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Загрузка дивидендов — T-Bank API</title>
+<style>
+body{font-family:monospace;background:#1a1a2e;color:#eee;padding:20px}
+button{background:#e94560;color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;margin:8px 4px}
+button:disabled{opacity:0.4}
+#log{background:#0f0f23;border:1px solid #333;border-radius:6px;padding:12px;margin-top:12px;max-height:500px;overflow-y:auto;font-size:12px;line-height:1.6;white-space:pre-wrap}
+.ok{color:#00b894}.err{color:#e17055}.warn{color:#fdcb6e}
+textarea{width:100%;height:60px;background:#0f0f23;color:#eee;border:1px solid #333;border-radius:4px;padding:8px;font-family:monospace;font-size:12px}
+a{color:#74b9ff}
+</style>
+</head>
+<body>
+<h2>Загрузка дивидендов с T-Bank Invest API</h2>
+<p>Скрипт загружает список всех акций TQBR с MOEX, находит их FIGI через T-Bank API,
+запрашивает дивиденды за 2010-2026 и сохраняет результат в <b>dividends.json</b>.</p>
+<p>Положите файл рядом с <b>backtest_v6.html</b>.</p>
+
+<label>T-Bank API Token:</label><br>
+<textarea id="token" placeholder="Вставьте токен T-Bank Invest API"></textarea><br>
+<button id="btnRun" onclick="run()">Загрузить дивиденды</button>
+<button id="btnSave" onclick="save()" disabled>Сохранить JSON</button>
+<div id="log"></div>
+
+<script>
+const TBANK='https://invest-public-api.tbank.ru/rest/tinkoff.public.invest.api.contract.v1';
+const MOEX='https://iss.moex.com/iss';
+let result=null;
+
+function log(msg,cls=''){
+  const el=document.getElementById('log');
+  if(cls) el.innerHTML+=`<span class="${cls}">${msg}</span>\n`;
+  else el.innerHTML+=msg+'\n';
+  el.scrollTop=el.scrollHeight;
+}
+
+async function tbankPost(method,body,token){
+  const r=await fetch(`${TBANK}.InstrumentsService/${method}`,{
+    method:'POST',
+    headers:{'Authorization':`Bearer ${token}`,'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  if(!r.ok){
+    const txt=await r.text();
+    throw new Error(`T-Bank ${method}: HTTP ${r.status} — ${txt.slice(0,200)}`);
+  }
+  return r.json();
+}
+
+function moneyToNum(m){
+  if(!m) return 0;
+  return (parseInt(m.units||'0'))+(parseInt(m.nano||'0'))/1e9;
+}
+
+function quotToNum(q){
+  if(!q) return 0;
+  return (parseInt(q.units||'0'))+(parseInt(q.nano||'0'))/1e9;
+}
+
+async function loadMoexTickers(){
+  log('Загрузка списка тикеров TQBR с MOEX...');
+  const url=`${MOEX}/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=securities&securities.columns=SECID,SHORTNAME,LISTLEVEL`;
+  const r=await fetch(url);
+  const d=await r.json();
+  const tickers=d.securities.data.filter(r=>r[2]>=1&&r[2]<=3).map(r=>r[0]);
+  log(`Найдено ${tickers.length} тикеров на TQBR`,`ok`);
+  return tickers;
+}
+
+async function loadTbankShares(token){
+  log('Загрузка инструментов T-Bank (акции)...');
+  const d=await tbankPost('Shares',{instrumentStatus:'INSTRUMENT_STATUS_ALL'},token);
+  const shares=d.instruments||[];
+  // Build ticker→uid map for TQBR shares
+  const map={};
+  for(const s of shares){
+    if(s.exchange==='MOEX'||s.exchange==='MOEX_EVENING_WEEKEND'){
+      // prefer class_code TQBR
+      if(s.classCode==='TQBR'||(s.classCode&&!map[s.ticker])){
+        map[s.ticker]={uid:s.uid,figi:s.figi,name:s.name,classCode:s.classCode};
+      }
+    }
+  }
+  log(`T-Bank: ${Object.keys(map).length} акций с MOEX mapping`,'ok');
+  return map;
+}
+
+async function loadDividends(uid,token){
+  const d=await tbankPost('GetDividends',{
+    instrumentId:uid,
+    from:'2010-01-01T00:00:00Z',
+    to:'2027-01-01T00:00:00Z'
+  },token);
+  return d.dividends||[];
+}
+
+function parseDate(ts){
+  if(!ts) return null;
+  return ts.slice(0,10);
+}
+
+async function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+
+async function run(){
+  const token=document.getElementById('token').value.trim();
+  if(!token){alert('Введите токен!');return}
+
+  const btn=document.getElementById('btnRun');
+  btn.disabled=true;
+  document.getElementById('log').innerHTML='';
+  result=null;
+
+  try{
+    const tickers=await loadMoexTickers();
+    const tbankMap=await loadTbankShares(token);
+
+    const divData={};
+    let found=0,skipped=0,total=tickers.length;
+
+    for(let i=0;i<tickers.length;i++){
+      const tk=tickers[i];
+      const info=tbankMap[tk];
+      if(!info){
+        skipped++;
+        continue;
+      }
+
+      try{
+        const divs=await loadDividends(info.uid,token);
+        if(divs.length>0){
+          divData[tk]=divs.map(d=>{
+            const obj={};
+            // last_buy_date is the last day you can buy to get dividend
+            // The ex-date is the next trading day after last_buy_date
+            if(d.lastBuyDate) obj.lastBuy=parseDate(d.lastBuyDate);
+            if(d.recordDate) obj.record=parseDate(d.recordDate);
+            if(d.paymentDate) obj.payment=parseDate(d.paymentDate);
+            if(d.declaredDate) obj.declared=parseDate(d.declaredDate);
+            obj.amount=moneyToNum(d.dividendNet);
+            obj.currency=d.dividendNet?.currency||'rub';
+            obj.yield=quotToNum(d.yieldValue);
+            if(d.closePrice) obj.closePrice=moneyToNum(d.closePrice);
+            obj.type=d.dividendType||'';
+            return obj;
+          }).filter(d=>d.amount>0);
+          if(divData[tk].length>0) found++;
+          else delete divData[tk];
+        }
+      }catch(e){
+        log(`  ${tk}: ошибка — ${e.message}`,'err');
+      }
+
+      if((i+1)%10===0||i===tickers.length-1){
+        log(`Прогресс: ${i+1}/${total} (дивиденды: ${found}, пропущено: ${skipped})`);
+      }
+      // Rate limiting — small delay between requests
+      await sleep(100);
+    }
+
+    result={
+      generated:new Date().toISOString(),
+      source:'T-Bank Invest API (GetDividends)',
+      tickerCount:Object.keys(divData).length,
+      dividends:divData
+    };
+
+    log('');
+    log(`Готово! ${Object.keys(divData).length} тикеров с дивидендами`,'ok');
+
+    let totalDivs=0;
+    for(const tk of Object.keys(divData)) totalDivs+=divData[tk].length;
+    log(`Всего ${totalDivs} дивидендных выплат`,'ok');
+    log('');
+    log('Нажмите "Сохранить JSON" чтобы скачать файл.');
+
+    document.getElementById('btnSave').disabled=false;
+  }catch(e){
+    log(`Ошибка: ${e.message}`,'err');
+    console.error(e);
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+function save(){
+  if(!result) return;
+  const blob=new Blob([JSON.stringify(result,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='dividends.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  log('Файл dividends.json сохранён!','ok');
+}
+</script>
+</body>
+</html>

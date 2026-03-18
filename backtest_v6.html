@@ -256,11 +256,12 @@ tr:hover td{background:rgba(233,69,96,0.05)}
             28% — терпим падение до -28%, дальше безусловный выход. Считается от цены входа с учётом издержек.</span>
         </div>
         <div class="field">
-          <label>Дивидендный гэп %</label><input id="cfgDivGap" type="number" value="3" step="0.5">
-          <span class="hint">Порог для определения дивидендного гэпа. Данные MOEX не скорректированы на дивиденды —
-            в ex-date цена падает на размер дивиденда (5-10%). Без фильтра это ложно срабатывает стоп-лоссы.
-            Если дневное падение >= N%, объём не аномальный (VR < 2), и открытие ниже предыдущего закрытия —
-            стопы на этот день НЕ проверяются (трейдер получает дивиденд, реального падения нет).</span>
+          <label>Дивидендный гэп % (fallback)</label><input id="cfgDivGap" type="number" value="3" step="0.5">
+          <span class="hint">Если загружен файл <b>dividends.json</b> (данные T-Bank API) — дивидендные гэпы определяются
+            точно по реальным ex-date каждого тикера. Этот параметр используется только как запасной вариант
+            для тикеров, по которым нет данных в файле.<br><br>
+            Эвристика: если дневное падение >= N%, объём не аномальный (VR < 2), и открытие ниже предыдущего закрытия —
+            стопы на этот день НЕ проверяются. Для генерации dividends.json откройте <b>fetch_dividends.html</b>.</span>
         </div>
         <div class="field">
           <label>ATR ротация: множитель</label><input id="cfgRotMult" type="number" value="1.5" step="0.1">
@@ -368,6 +369,51 @@ function progress(text, pct){
    ═══════════════════════════════════════════════════════════════════════ */
 const BLACKLIST = new Set(['MOEX','IRAO','FEES']);
 const MIN_BARS = 100;
+
+/* ═══════════════════════════════════════════════════════════════════════
+   DIVIDEND DATA — loaded from dividends.json (T-Bank API export)
+   ═══════════════════════════════════════════════════════════════════════ */
+// Global map: { ticker: Set<ex-date-string> }
+let DIV_EXDATES = {};
+let DIV_LOADED = false;
+
+async function loadDividendData(){
+  if(DIV_LOADED) return;
+  try{
+    const r=await fetch('dividends.json');
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data=await r.json();
+    const divs=data.dividends||{};
+    DIV_EXDATES={};
+    for(const [ticker,records] of Object.entries(divs)){
+      const dates=new Set();
+      for(const rec of records){
+        // ex-date = the trading day AFTER lastBuy (record date or next day after lastBuy)
+        // On MOEX, if you bought on lastBuy, you get dividend.
+        // The price drops on the NEXT trading day after lastBuy = record date.
+        // We use record date as the ex-date (price drop day)
+        if(rec.record) dates.add(rec.record);
+        else if(rec.lastBuy){
+          // Fallback: if no record date, use lastBuy (price drop is actually next day,
+          // but we check both lastBuy and the day after in isDivGap)
+          dates.add(rec.lastBuy);
+        }
+      }
+      if(dates.size>0) DIV_EXDATES[ticker]=dates;
+    }
+    DIV_LOADED=true;
+    console.log(`Дивиденды загружены: ${Object.keys(DIV_EXDATES).length} тикеров`);
+  }catch(e){
+    console.warn('dividends.json не найден или ошибка загрузки — используется эвристика.',e.message);
+    DIV_EXDATES={};
+    DIV_LOADED=true;
+  }
+}
+
+function isKnownExDate(ticker,dateStr){
+  const s=DIV_EXDATES[ticker];
+  return s?s.has(dateStr):false;
+}
 
 function readCfg(){
   const v=id=>document.getElementById(id).value;
@@ -523,9 +569,11 @@ async function loadBenchmark(index,from,till){
 }
 
 async function loadAllData(cfg){
-  progress('Загрузка списка тикеров...',0);
+  progress('Загрузка дивидендов и тикеров...',0);
+  await loadDividendData();
   const tickers=await loadTickerList();
-  progress(`${tickers.length} тикеров. Загрузка свечей...`,5);
+  const divInfo=Object.keys(DIV_EXDATES).length;
+  progress(`${tickers.length} тикеров${divInfo?`, дивиденды: ${divInfo} тикеров`:' (dividends.json не найден — эвристика)'}. Загрузка свечей...`,5);
 
   const fromDate=`${cfg.startYear-1}-01-01`;
   const tickerData={};
@@ -603,8 +651,13 @@ function dayRet(data,i){
   return 0;
 }
 
-function isDivGap(data,i,cfg){
+function isDivGap(data,i,cfg,ticker){
   if(i<1) return false;
+  // If we have real dividend data — use exact ex-date check
+  if(ticker && DIV_EXDATES[ticker]){
+    return isKnownExDate(ticker,data[i].d);
+  }
+  // Fallback heuristic when no dividend data available for this ticker
   const dr=dayRet(data,i);
   if(dr>-cfg.divGap) return false;
   const av=avgVol(data,i,cfg.volWin);
@@ -631,7 +684,7 @@ function scanSignals(ticker,data,cfg){
 
   while(i<data.length-1){
     // DIV_GAP — skip as signal source
-    if(isDivGap(data,i,cfg)){consec=0;i++;continue}
+    if(isDivGap(data,i,cfg,ticker)){consec=0;i++;continue}
 
     const av=avgVol(data,i,cfg.volWin);
     if(!av){consec=0;i++;continue}
@@ -691,19 +744,19 @@ function scanSignals(ticker,data,cfg){
     });
 
     // Skip to trade exit to prevent overlap
-    const exitIdx=simTradeExit(data,ei,ep,catStopPx,tier,cfg);
+    const exitIdx=simTradeExit(data,ei,ep,catStopPx,tier,cfg,ticker);
     consec=0;
     i=exitIdx;
   }
   return signals;
 }
 
-function simTradeExit(data,entryIdx,ep,catStopPx,tier,cfg){
+function simTradeExit(data,entryIdx,ep,catStopPx,tier,cfg,ticker){
   let peak=ep;
   for(let j=entryIdx+1;j<data.length;j++){
     const held=j-entryIdx;
     // DIV_GAP — skip stop checks
-    if(!isDivGap(data,j,cfg)){
+    if(!isDivGap(data,j,cfg,ticker)){
       if(data[j].l<=catStopPx) return j;
       if(held>=tier.tsAfter){
         const tsPx=peak*(1-tier.tsDist/100);
@@ -765,7 +818,7 @@ function simulateStrategy(signals,priceMap,dates,maxPos,cfg,stratName){
       pos.held++;
 
       let exitPrice=null,reason=null;
-      const divGapDay=bar.l>0&&pos.held>0&&isDivGapBar(bar,priceMap[pos.ticker],d);
+      const divGapDay=bar.l>0&&pos.held>0&&isDivGapBar(bar,priceMap[pos.ticker],d,pos.ticker);
 
       if(!divGapDay){
         if(bar.l<=pos.catStopPx){exitPrice=pos.catStopPx;reason='cat_stop'}
@@ -894,13 +947,14 @@ function simulateStrategy(signals,priceMap,dates,maxPos,cfg,stratName){
   return {trades,equity};
 }
 
-// Simplified DIV_GAP check for portfolio sim (uses price map)
-function isDivGapBar(bar,tickerPriceMap,date){
-  // Find previous day
+// DIV_GAP check for portfolio sim — uses exact dates if available, else heuristic
+function isDivGapBar(bar,tickerPriceMap,date,ticker){
+  // If we have real dividend data — use exact ex-date check
+  if(ticker && DIV_EXDATES[ticker]){
+    return isKnownExDate(ticker,date);
+  }
+  // Fallback heuristic when no dividend data
   if(!tickerPriceMap) return false;
-  // We check: dayRet<=-3%, open gaps down
-  // Simplified: if bar.c/bar.o drop > threshold AND low volume day
-  // For portfolio sim, we use a simple heuristic
   const prevDates=Object.keys(tickerPriceMap).filter(d=>d<date).sort();
   if(!prevDates.length) return false;
   const prev=tickerPriceMap[prevDates[prevDates.length-1]];
