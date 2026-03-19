@@ -82,208 +82,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
 <div class="container">
 
   <!-- ═══ PANEL: BASIC ═══ -->
-  <div class="panel">
-    <h3 class="open" onclick="togglePanel(this)">Основные параметры</h3>
-    <div class="panel-body open">
-      <div class="section-desc">
-        Базовые настройки симуляции: начальный капитал, период тестирования, количество одновременно открытых позиций
-        и транзакционные издержки. Стратегия разделена на два портфеля — S1 (ликвидные акции) и S2 (неликвидные).
-        Каждый портфель управляется отдельно с собственным лимитом позиций и кэшем.
-      </div>
-      <div class="grid">
-        <div class="field">
-          <label>Капитал ₽</label><input id="cfgCapital" type="number" value="1000000">
-          <span class="hint">Начальный капитал в рублях. Используется для расчёта годовой прибыли в таблице.
-            Каждый год считается как будто вы начинаете заново с этой суммы (прибыль снимается).</span>
-        </div>
-        <div class="field">
-          <label>Год старта</label><input id="cfgStartYear" type="number" value="2015">
-          <span class="hint">С какого года начинать симуляцию. Данные загружаются на 1 год раньше
-            (для расчёта индикаторов: MA50, ATR, средний объём). Чем больше период — тем надёжнее статистика.</span>
-        </div>
-        <div class="field">
-          <label>Макс. позиций S1</label><input id="cfgMaxPos1" type="number" value="2" min="1" max="10">
-          <span class="hint">Максимум одновременно открытых позиций в портфеле S1 (ликвидные акции,
-            среднедневной оборот >= порога ликвидности). Больше позиций = меньше концентрация, но меньше доля на каждую сделку.</span>
-        </div>
-        <div class="field">
-          <label>Макс. позиций S2</label><input id="cfgMaxPos2" type="number" value="2" min="1" max="10">
-          <span class="hint">Максимум позиций в портфеле S2 (неликвидные акции, оборот ниже порога).
-            Неликвидные бумаги более волатильны — можно ставить меньше позиций для контроля риска.</span>
-        </div>
-        <div class="field">
-          <label>Комиссия %</label><input id="cfgCommission" type="number" value="0.05" step="0.01">
-          <span class="hint">Комиссия брокера в процентах от суммы сделки. Применяется дважды: при входе и при выходе.
-            Например, 0.05% = 50 руб. с каждых 100 000 руб. оборота. Тинькофф: ~0.04%, БКС: ~0.05%.</span>
-        </div>
-        <div class="field">
-          <label>Проскальзывание %</label><input id="cfgSlippage" type="number" value="0.10" step="0.01">
-          <span class="hint">Разница между ожидаемой и реальной ценой исполнения. Модельная оценка: вы покупаете чуть дороже,
-            продаёте чуть дешевле. 0.10% — консервативная оценка для ликвидных акций MOEX. Для неликвидных может быть 0.2-0.5%.</span>
-        </div>
-        <div class="field">
-          <label>OOS год</label><input id="cfgOosYear" type="number" value="2023">
-          <span class="hint">Граница разделения данных на In-Sample (IS) и Out-of-Sample (OOS) для Walk-Forward анализа.
-            Сделки до этого года = IS (на них «подбирали» параметры), после = OOS (проверка на «свежих» данных).
-            Если OOS показывает похожие результаты — стратегия подтверждена, если хуже — возможен оверфит.</span>
-        </div>
-        <!-- Ребалансировка: зафиксирована = none (конфигурация #12) -->
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ PANEL: SIGNAL ═══ -->
-  <div class="panel">
-    <h3 onclick="togglePanel(this)">Параметры сигнала</h3>
-    <div class="panel-body">
-      <div class="section-desc">
-        Условия генерации торгового сигнала. В день T (сигнальный день) проверяются ВСЕ условия одновременно.
-        Если хотя бы одно не выполнено — сигнала нет. На следующий день T+1 проверяется подтверждение объёма
-        и отсутствие гэпа. Только после этого происходит вход по цене закрытия T+1.
-      </div>
-      <div class="grid">
-        <!-- VR минимальный: зафиксирован = 3.6 (конфигурация #12) -->
-        <div class="field">
-          <label>VR максимальный</label><input id="cfgMaxVr" type="number" value="10" step="0.5">
-          <span class="hint">Верхний фильтр VR. Если VR слишком высокий (> 10) — это может быть шум: технические
-            сделки, блочные кроссы, ошибки данных. Такие сигналы пропускаются. Поставьте 999 чтобы отключить фильтр.</span>
-        </div>
-        <div class="field">
-          <label>Дней подряд VR</label><input id="cfgSigDays" type="number" value="1" min="1" max="5">
-          <span class="hint">Сколько дней подряд VR должен быть >= порога (volMin), прежде чем генерируется сигнал.
-            При значении 1 — достаточно одного дня с высоким объёмом. При 2 — нужно два дня подряд
-            (более строгий фильтр, отсекает однодневные всплески).</span>
-        </div>
-        <!-- ATR% минимальный: зафиксирован = 1.8 (конфигурация #12) -->
-        <div class="field">
-          <label>ATR окно (дней)</label><input id="cfgAtrWin" type="number" value="20" min="5" max="60">
-          <span class="hint">За сколько предыдущих дней считать ATR. 20 дней — стандарт (примерно 1 торговый месяц).
-            Меньше = ATR реагирует быстрее на изменение волатильности. Больше = более сглаженное значение.</span>
-        </div>
-        <div class="field">
-          <label>MA период</label><input id="cfgMaPeriod" type="number" value="50" min="10" max="200">
-          <span class="hint">Период скользящей средней (Simple Moving Average). По умолчанию MA50 — средняя цена
-            за 50 дней. Используется как фильтр тренда: покупаем только когда цена выше MA (восходящий тренд).
-            MA200 — долгосрочный тренд, MA20 — краткосрочный.</span>
-        </div>
-        <div class="field">
-          <label>Фильтр по MA</label>
-          <select id="cfgMaFilter"><option value="above">Выше MA (тренд вверх)</option><option value="any">Любое положение</option></select>
-          <span class="hint">«Выше MA» — классический трендовый фильтр: сигнал только когда цена закрытия выше
-            скользящей средней (акция в восходящем тренде). «Любое» — отключает этот фильтр,
-            позволяя входить и в нисходящем тренде (контртрендовые сигналы).</span>
-        </div>
-        <div class="field">
-          <label>Бычий бар</label>
-          <select id="cfgBullBar"><option value="yes">Обязателен (close > open)</option><option value="no">Не требуется</option></select>
-          <span class="hint">Бычий бар = цена закрытия выше цены открытия (зелёная свеча). Это подтверждает, что
-            покупатели контролируют ситуацию в течение дня. Отключение позволяет входить на красных свечах
-            с высоким объёмом (поглощение продавцов).</span>
-        </div>
-        <!-- ClosePos минимум: зафиксирован = 0.55 (конфигурация #12) -->
-        <div class="field">
-          <label>DayRet максимум %</label><input id="cfgMaxDayRet" type="number" value="10" step="1">
-          <span class="hint">Максимальная дневная доходность акции в сигнальный день. Если акция выросла больше чем
-            на 10% за день — это может быть перегрев, и покупка на следующий день рискованна (откат).
-            Фильтр защищает от входа на хвосте параболического роста.</span>
-        </div>
-        <div class="field">
-          <label>VR подтверждения (T+1)</label><input id="cfgVrConfirm" type="number" value="2.0" step="0.1">
-          <span class="hint">Минимальный VR на следующий день после сигнала (день входа T+1). Подтверждение, что
-            повышенный интерес к бумаге сохраняется, а не был случайным всплеском. VR = 2.0 = объём вдвое
-            выше нормы. Если не выполнен — вход отменяется, сигнал пропускается.</span>
-        </div>
-        <div class="field">
-          <label>GAP Cancel %</label><input id="cfgGapCancel" type="number" value="6" step="1">
-          <span class="hint">Если цена открытия T+1 гэпнула вверх более чем на N% от закрытия сигнального дня —
-            вход отменяется. Защита от покупки по завышенной цене после ночного гэпа.
-            6% — если акция закрылась по 100₽, а на следующий день открылась выше 106₽, мы не входим.</span>
-        </div>
-        <div class="field">
-          <label>Окно среднего объёма</label><input id="cfgVolWin" type="number" value="60" min="20" max="120">
-          <span class="hint">За сколько предыдущих торговых дней считать средний объём для расчёта VR.
-            60 дней ≈ 3 торговых месяца. Меньше = среднее быстрее реагирует на изменение активности.
-            Больше = более стабильная база, но может не учитывать недавние изменения ликвидности.</span>
-        </div>
-        <div class="field">
-          <label>Порог ликвидности (млн ₽)</label><input id="cfgLiq" type="number" value="100" step="10">
-          <span class="hint">Среднедневной оборот в рублях для разделения на портфели S1 и S2.
-            Акции с оборотом >= 100 млн (SBER, LKOH, GAZP и т.д.) → портфель S1 (ликвидные).
-            Акции с оборотом < 100 млн → портфель S2 (неликвидные). Неликвидные бумаги
-            часто дают большую доходность, но с большим проскальзыванием и рисками.</span>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ═══ PANEL: EXIT ═══ -->
-  <div class="panel">
-    <h3 onclick="togglePanel(this)">Параметры выхода / Тиры</h3>
-    <div class="panel-body">
-      <div class="section-desc">
-        Как и когда закрывать позиции. Каждая сделка имеет тир (уровень силы сигнала), который определяет
-        максимальный срок удержания и параметры трейлинг-стопа. Чем сильнее сигнал (выше VR) — тем дольше
-        держим позицию и тем свободнее трейлинг-стоп.
-      </div>
-      <div class="grid">
-        <!-- Катастрофический стоп: зафиксирован = 28% (конфигурация #12) -->
-        <div class="field">
-          <label>Дивидендный гэп % (fallback)</label><input id="cfgDivGap" type="number" value="3" step="0.5">
-          <span class="hint">Если загружен файл <b>dividends.json</b> (данные MOEX ISS API) — дивидендные гэпы определяются
-            точно по реальным ex-date (registryclosedate) каждого тикера. Этот параметр используется только как
-            запасной вариант для тикеров, по которым нет данных в файле.<br><br>
-            Эвристика: если дневное падение >= N%, объём не аномальный (VR &lt; 2), и открытие ниже предыдущего закрытия —
-            стопы на этот день НЕ проверяются. Для генерации dividends.json откройте <b>fetch_dividends.html</b>.</span>
-        </div>
-        <div class="field">
-          <label>ATR ротация: множитель</label><input id="cfgRotMult" type="number" value="1.5" step="0.1">
-          <span class="hint">Для замены слабой позиции на новую через ATR-ротацию: ATR нового кандидата должен быть
-            в N раз больше ATR самой «тихой» открытой позиции. 1.5 = волатильность кандидата на 50% выше.
-            Смысл: заменяем «затухшую» бумагу на более активную.</span>
-        </div>
-        <div class="field">
-          <label>ATR ротация: мин. разница п.п.</label><input id="cfgRotAbs" type="number" value="0.5" step="0.1">
-          <span class="hint">Второе условие ATR-ротации: абсолютная разница ATR% между кандидатом и слабой позицией
-            должна быть >= N процентных пунктов. Защита от ротации при малой разнице (ATR 2.0 vs 1.5 —
-            формально x1.33, но разница всего 0.5 п.п., ротация сомнительна).</span>
-        </div>
-      </div>
-
-      <table style="margin-top:14px;width:auto">
-        <thead><tr><th></th><th style="min-width:50px">Вкл</th><th>Мин VR</th><th>MaxHold</th><th>TS After</th><th>TS Dist %</th></tr></thead>
-        <tbody>
-          <tr><td><span class="tag tag-ultra">ULTRA</span></td><td><input type="checkbox" id="tierUltraOn" checked></td>
-              <td><input id="tierUltraVr" type="number" value="7.0" step="0.1" style="width:60px"></td>
-              <td><input id="tierUltraHold" type="number" value="15" style="width:50px"></td>
-              <td><input id="tierUltraAfter" type="number" value="6" style="width:50px"></td>
-              <td><input id="tierUltraDist" type="number" value="2.6" step="0.1" style="width:60px"></td></tr>
-          <tr><td><span class="tag tag-strong">STRONG</span></td><td><input type="checkbox" id="tierStrongOn" checked></td>
-              <td><input id="tierStrongVr" type="number" value="6.5" step="0.1" style="width:60px"></td>
-              <td><input id="tierStrongHold" type="number" value="13" style="width:50px"></td>
-              <td><input id="tierStrongAfter" type="number" value="6" style="width:50px"></td>
-              <td><input id="tierStrongDist" type="number" value="1.8" step="0.1" style="width:60px"></td></tr>
-          <tr><td><span class="tag tag-base">BASE</span></td><td><input type="checkbox" id="tierBaseOn" checked></td>
-              <td><input id="tierBaseVr" type="number" value="3.6" step="0.1" style="width:60px"></td>
-              <td><input id="tierBaseHold" type="number" value="10" style="width:50px"></td>
-              <td><input id="tierBaseAfter" type="number" value="5" style="width:50px"></td>
-              <td><input id="tierBaseDist" type="number" value="1.4" step="0.1" style="width:60px"></td></tr>
-        </tbody>
-      </table>
-      <div class="tier-desc">
-        <b>Тиры</b> — уровни силы сигнала, определяются по VR сигнального дня. Первое совпадение сверху побеждает.<br><br>
-        <b>Мин VR</b> — минимальный Volume Ratio для попадания в тир. VR >= 7.0 = ULTRA (сверхсильный сигнал),
-        VR >= 6.5 = STRONG, VR >= 3.6 = BASE (базовый). Можно отключить любой тир чекбоксом.<br><br>
-        <b>MaxHold</b> — максимальный срок удержания позиции в торговых днях. Если за это время не сработал ни один
-        стоп — позиция закрывается по цене закрытия. ULTRA = 15 дней (даём больше времени для сильных сигналов).<br><br>
-        <b>TS After</b> — через сколько дней после входа активируется трейлинг-стоп. Первые N дней позиция защищена
-        только катастрофическим стопом — даём цене «раскачаться» без преждевременного выбивания.<br><br>
-        <b>TS Dist %</b> — расстояние трейлинг-стопа от пика цены в процентах. После активации (день TS After)
-        каждый день считается: стоп = максимальная цена за всё время удержания × (1 - TS Dist / 100).
-        Если дневной минимум опустился ниже этого уровня — выход. Пример: пик = 110₽, TS Dist = 2.6% →
-        стоп = 110 × 0.974 = 107.14₽. Чем выше TS Dist — тем свободнее стоп (для сильных сигналов).
-      </div>
-    </div>
-  </div>
+  <!-- Все параметры зафиксированы (конфигурация #12, batch backtest 2026-03-19) -->
 
   <!-- ═══ TOOLBAR ═══ -->
   <div class="toolbar">
@@ -392,31 +191,29 @@ function isKnownExDate(ticker,dateStr){
 }
 
 function readCfg(){
-  const v=id=>document.getElementById(id).value;
-  const n=id=>parseFloat(v(id));
-  const c=id=>document.getElementById(id).checked;
+  /* Все параметры зафиксированы — конфигурация #12 (batch backtest 2026-03-19) */
   return {
-    capital:n('cfgCapital'), startYear:n('cfgStartYear')|0,
-    maxPos1:n('cfgMaxPos1')|0, maxPos2:n('cfgMaxPos2')|0,
-    commission:n('cfgCommission')/100, slippage:n('cfgSlippage')/100,
-    oosYear:n('cfgOosYear')|0, rebal:'none',
-    // signal (volMin, atrMin, cpMin, stopPct зафиксированы — конфигурация #12)
-    volMin:3.6, maxVr:n('cfgMaxVr'),
-    sigDays:n('cfgSigDays')|0, atrMin:1.8,
-    atrWin:n('cfgAtrWin')|0, maPeriod:n('cfgMaPeriod')|0,
-    maFilter:v('cfgMaFilter'), bullBar:v('cfgBullBar')==='yes',
-    cpMin:0.55, maxDayRet:n('cfgMaxDayRet'),
-    vrConfirm:n('cfgVrConfirm'), gapCancel:n('cfgGapCancel'),
-    volWin:n('cfgVolWin')|0, liq:n('cfgLiq')*1e6,
+    capital:1000000, startYear:2015,
+    maxPos1:2, maxPos2:2,
+    commission:0.0005, slippage:0.001,
+    oosYear:2023, rebal:'none',
+    // signal
+    volMin:3.6, maxVr:10,
+    sigDays:1, atrMin:1.8,
+    atrWin:20, maPeriod:50,
+    maFilter:'above', bullBar:true,
+    cpMin:0.55, maxDayRet:10,
+    vrConfirm:2.0, gapCancel:6,
+    volWin:60, liq:100e6,
     // exit
-    stopPct:28, divGap:n('cfgDivGap'),
-    rotMult:n('cfgRotMult'), rotAbs:n('cfgRotAbs'),
+    stopPct:28, divGap:3,
+    rotMult:1.5, rotAbs:0.5,
     // tiers (sorted by VR desc)
     tiers:[
-      c('tierUltraOn') ?{name:'ULTRA', minVr:n('tierUltraVr'),maxHold:n('tierUltraHold')|0,tsAfter:n('tierUltraAfter')|0,tsDist:n('tierUltraDist')}:null,
-      c('tierStrongOn')?{name:'STRONG',minVr:n('tierStrongVr'),maxHold:n('tierStrongHold')|0,tsAfter:n('tierStrongAfter')|0,tsDist:n('tierStrongDist')}:null,
-      c('tierBaseOn')  ?{name:'BASE',  minVr:n('tierBaseVr'),  maxHold:n('tierBaseHold')|0,  tsAfter:n('tierBaseAfter')|0,  tsDist:n('tierBaseDist')}:null,
-    ].filter(Boolean).sort((a,b)=>b.minVr-a.minVr),
+      {name:'ULTRA', minVr:7.0, maxHold:15, tsAfter:6, tsDist:2.6},
+      {name:'STRONG',minVr:6.5, maxHold:13, tsAfter:6, tsDist:1.8},
+      {name:'BASE',  minVr:3.6, maxHold:10, tsAfter:5, tsDist:1.4},
+    ],
   };
 }
 
