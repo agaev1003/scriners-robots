@@ -127,13 +127,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
             Сделки до этого года = IS (на них «подбирали» параметры), после = OOS (проверка на «свежих» данных).
             Если OOS показывает похожие результаты — стратегия подтверждена, если хуже — возможен оверфит.</span>
         </div>
-        <div class="field">
-          <label>Ребалансировка</label>
-          <select id="cfgRebal"><option value="none">Нет</option><option value="half">50%</option><option value="quarter">25%</option></select>
-          <span class="hint">Что делать, когда в портфеле 1 позиция и появляется новый кандидат:
-            «Нет» — ждём свободный слот. «50%» — продаём половину текущей позиции, на освободившиеся деньги
-            входим в нового кандидата. «25%» — продаём четверть. Позволяет быстрее диверсифицироваться.</span>
-        </div>
+        <!-- Ребалансировка: зафиксирована = none (конфигурация #12) -->
       </div>
     </div>
   </div>
@@ -148,13 +142,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
         и отсутствие гэпа. Только после этого происходит вход по цене закрытия T+1.
       </div>
       <div class="grid">
-        <div class="field">
-          <label>VR минимальный</label><input id="cfgVolMin" type="number" value="3.6" step="0.1">
-          <span class="hint">Volume Ratio — во сколько раз объём торгов в сигнальный день превышает средний объём
-            за последние N дней. VR = 3.6 означает: объём в 3.6 раза выше нормы. Это ключевой фильтр стратегии —
-            аномальный объём указывает на крупного покупателя (инсайдер, фонд, маркет-мейкер).
-            Чем выше порог — тем меньше сигналов, но качественнее.</span>
-        </div>
+        <!-- VR минимальный: зафиксирован = 3.6 (конфигурация #12) -->
         <div class="field">
           <label>VR максимальный</label><input id="cfgMaxVr" type="number" value="10" step="0.5">
           <span class="hint">Верхний фильтр VR. Если VR слишком высокий (> 10) — это может быть шум: технические
@@ -166,13 +154,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
             При значении 1 — достаточно одного дня с высоким объёмом. При 2 — нужно два дня подряд
             (более строгий фильтр, отсекает однодневные всплески).</span>
         </div>
-        <div class="field">
-          <label>ATR% минимальный</label><input id="cfgAtrMin" type="number" value="1.5" step="0.1">
-          <span class="hint">Минимальная фоновая волатильность акции в процентах. ATR (Average True Range) за N дней,
-            делённый на текущую цену. Считается БЕЗ сигнального дня, чтобы измерять именно обычную волатильность.
-            Фильтр отсекает «скучные» бумаги, где движения слишком малы для трейлинг-стопа.
-            1.5% = акция двигается в среднем на 1.5% в день.</span>
-        </div>
+        <!-- ATR% минимальный: зафиксирован = 1.8 (конфигурация #12) -->
         <div class="field">
           <label>ATR окно (дней)</label><input id="cfgAtrWin" type="number" value="20" min="5" max="60">
           <span class="hint">За сколько предыдущих дней считать ATR. 20 дней — стандарт (примерно 1 торговый месяц).
@@ -198,12 +180,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
             покупатели контролируют ситуацию в течение дня. Отключение позволяет входить на красных свечах
             с высоким объёмом (поглощение продавцов).</span>
         </div>
-        <div class="field">
-          <label>ClosePos минимум</label><input id="cfgCpMin" type="number" value="0.55" step="0.05" min="0" max="1">
-          <span class="hint">Позиция закрытия в диапазоне дня: CP = (close - low) / (high - low). Значение от 0 до 1.
-            CP = 1.0 — закрылись на максимуме дня. CP = 0 — на минимуме. CP >= 0.45 означает: цена закрылась
-            в верхних 55% дневного диапазона — покупатели сильнее продавцов к концу дня.</span>
-        </div>
+        <!-- ClosePos минимум: зафиксирован = 0.55 (конфигурация #12) -->
         <div class="field">
           <label>DayRet максимум %</label><input id="cfgMaxDayRet" type="number" value="10" step="1">
           <span class="hint">Максимальная дневная доходность акции в сигнальный день. Если акция выросла больше чем
@@ -249,12 +226,7 @@ tr:hover td{background:rgba(233,69,96,0.05)}
         держим позицию и тем свободнее трейлинг-стоп.
       </div>
       <div class="grid">
-        <div class="field">
-          <label>Катастрофический стоп %</label><input id="cfgStopLoss" type="number" value="28" step="1">
-          <span class="hint">Аварийный стоп-лосс. Если цена упала на N% от цены входа — позиция закрывается немедленно,
-            без ожидания. Защита от катастрофических потерь (банкротство, делистинг, чёрный лебедь).
-            28% — терпим падение до -28%, дальше безусловный выход. Считается от цены входа с учётом издержек.</span>
-        </div>
+        <!-- Катастрофический стоп: зафиксирован = 28% (конфигурация #12) -->
         <div class="field">
           <label>Дивидендный гэп % (fallback)</label><input id="cfgDivGap" type="number" value="3" step="0.5">
           <span class="hint">Если загружен файл <b>dividends.json</b> (данные MOEX ISS API) — дивидендные гэпы определяются
@@ -427,17 +399,17 @@ function readCfg(){
     capital:n('cfgCapital'), startYear:n('cfgStartYear')|0,
     maxPos1:n('cfgMaxPos1')|0, maxPos2:n('cfgMaxPos2')|0,
     commission:n('cfgCommission')/100, slippage:n('cfgSlippage')/100,
-    oosYear:n('cfgOosYear')|0, rebal:v('cfgRebal'),
-    // signal
-    volMin:n('cfgVolMin'), maxVr:n('cfgMaxVr'),
-    sigDays:n('cfgSigDays')|0, atrMin:n('cfgAtrMin'),
+    oosYear:n('cfgOosYear')|0, rebal:'none',
+    // signal (volMin, atrMin, cpMin, stopPct зафиксированы — конфигурация #12)
+    volMin:3.6, maxVr:n('cfgMaxVr'),
+    sigDays:n('cfgSigDays')|0, atrMin:1.8,
     atrWin:n('cfgAtrWin')|0, maPeriod:n('cfgMaPeriod')|0,
     maFilter:v('cfgMaFilter'), bullBar:v('cfgBullBar')==='yes',
-    cpMin:n('cfgCpMin'), maxDayRet:n('cfgMaxDayRet'),
+    cpMin:0.55, maxDayRet:n('cfgMaxDayRet'),
     vrConfirm:n('cfgVrConfirm'), gapCancel:n('cfgGapCancel'),
     volWin:n('cfgVolWin')|0, liq:n('cfgLiq')*1e6,
     // exit
-    stopPct:n('cfgStopLoss'), divGap:n('cfgDivGap'),
+    stopPct:28, divGap:n('cfgDivGap'),
     rotMult:n('cfgRotMult'), rotAbs:n('cfgRotAbs'),
     // tiers (sorted by VR desc)
     tiers:[
