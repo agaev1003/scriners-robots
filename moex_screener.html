@@ -73,6 +73,30 @@ header .subtitle{color:var(--muted);font-size:.85rem;margin-top:2px}
 
 .empty-state{text-align:center;padding:60px 24px;color:var(--muted);font-size:1rem}
 
+/* Portfolio section */
+.portfolio-section{padding:0 24px 40px}
+.portfolio-section h2{font-size:1.3rem;margin:24px 0 12px;border-bottom:2px solid var(--accent);padding-bottom:8px}
+.port-tabs{display:flex;gap:0;margin-bottom:16px}
+.port-tab{padding:8px 20px;background:var(--surface);border:1px solid var(--border);cursor:pointer;font-size:.85rem;color:var(--muted);transition:all .15s}
+.port-tab:first-child{border-radius:8px 0 0 8px}
+.port-tab:last-child{border-radius:0 8px 8px 0}
+.port-tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.port-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.port-stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;text-align:center}
+.port-stat .stat-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.port-stat .stat-val{font-size:1.2rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.port-equity{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;overflow-x:auto}
+.port-equity canvas{width:100%;height:200px}
+.port-trades{width:100%;border-collapse:collapse;font-size:.8rem}
+.port-trades th{background:var(--surface);color:var(--muted);padding:8px 10px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);position:sticky;top:0}
+.port-trades td{padding:6px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.port-trades tr:hover{background:var(--surface)}
+.port-trades .ret-pos{color:var(--green);font-weight:600}
+.port-trades .ret-neg{color:var(--red);font-weight:600}
+.port-trades-wrap{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+.port-positions{margin-bottom:16px}
+.port-positions h3{font-size:.95rem;color:var(--muted);margin-bottom:8px}
+
 @media(max-width:800px){
   .grid{grid-template-columns:1fr}
   .toolbar,.filter-bar{gap:6px;padding:8px 12px}
@@ -122,6 +146,19 @@ header .subtitle{color:var(--muted);font-size:.85rem;margin-top:2px}
 <div class="grid" id="grid"></div>
 <div class="empty-state" id="emptyState" style="display:none">Нет сигналов. Нажмите «Сканировать» для поиска.</div>
 
+<div class="portfolio-section" id="portfolioSection" style="display:none">
+  <h2>Модельный портфель (последний год)</h2>
+  <div class="port-tabs">
+    <div class="port-tab active" onclick="switchPortTab('combined')">Общий</div>
+    <div class="port-tab" onclick="switchPortTab('s1')">S1 (ликвидные)</div>
+    <div class="port-tab" onclick="switchPortTab('s2')">S2 (неликвидные)</div>
+  </div>
+  <div class="port-stats" id="portStats"></div>
+  <div class="port-positions" id="portPositions"></div>
+  <div class="port-equity"><canvas id="equityCanvas" height="200"></canvas></div>
+  <div class="port-trades-wrap"><table class="port-trades"><thead id="portTradesHead"></thead><tbody id="portTradesBody"></tbody></table></div>
+</div>
+
 <script>
 /* ─── Strategy Parameters (hardcoded, identical to backtest) ─── */
 const P = {
@@ -133,6 +170,8 @@ const P = {
   volWin:60, liq:100e6,
   stopPct:28, divGap:3,
   commission:0.0005, slippage:0.001,
+  rotMult:1.5, rotAbs:0.5,
+  maxPos1:2, maxPos2:2,
   tiers:[
     {name:'ULTRA', minVr:7.0, maxHold:15, tsAfter:6, tsDist:2.6},
     {name:'STRONG',minVr:6.5, maxHold:13, tsAfter:6, tsDist:1.8},
@@ -482,6 +521,249 @@ function scanTicker(data, divDates){
   return signals;
 }
 
+/* ─── Full-year Signal Scanner (for portfolio simulation) ─── */
+function scanTickerFull(data, divDates){
+  const signals=[];
+  const len=data.length;
+  // Start 1 year back (approx 250 trading days) but ensure enough history for indicators
+  const oneYearBars=250;
+  const startIdx=Math.max(P.volWin+P.maPeriod, len-oneYearBars);
+  let consec=0;
+
+  for(let i=startIdx; i<len-1; i++){
+    const bar=data[i];
+    if(isDivGap(data,i,divDates)){consec=0;continue}
+    const av=avgVol(data,i,P.volWin);
+    if(!av){consec=0;continue}
+    const vr=bar.v/av;
+    if(vr>=P.volMin) consec++; else {consec=0;continue}
+    if(consec<P.sigDays) continue;
+    if(vr>P.maxVr) continue;
+    const atr=atrPct(data,i,P.atrWin);
+    if(!atr||atr<P.atrMin) continue;
+    const ma=maVal(data,i,P.maPeriod);
+    if(!ma) continue;
+    if(bar.c<=ma) continue;
+    if(P.bullBar&&bar.c<=bar.o) continue;
+    const cp=closePos(bar);
+    if(cp<P.cpMin) continue;
+    const dr=dayRet(data,i);
+    if(dr>P.maxDayRet) continue;
+    const tier=getTier(vr);
+    if(!tier) continue;
+    const avgVal=avgValueRub(data,i,200);
+    const isLiquid=avgVal&&avgVal>=P.liq;
+
+    // T+1 checks
+    const ei=i+1;
+    if(ei>=len) continue;
+    const nextBar=data[ei];
+    const gapThreshold=bar.c*(1+P.gapCancel/100);
+    if(nextBar.o>gapThreshold) continue;
+    const avE=avgVol(data,ei,P.volWin);
+    if(!avE) continue;
+    const vrE=nextBar.v/avE;
+    if(vrE<P.vrConfirm) continue;
+
+    const ep=nextBar.c*(1+P.commission+P.slippage);
+    const catStopPx=ep*(1-P.stopPct/100);
+
+    signals.push({
+      ticker:null, // filled later
+      signalDate:bar.d, entryDate:nextBar.d,
+      vr, vrEntry:vrE, tier, atr20:atr,
+      ep, catStopPx, liqAvg:avgVal, isLiquid,
+      cp, dayRetPct:dr,
+    });
+
+    // Skip forward past this trade's exit
+    let peak=ep;
+    for(let j=ei+1;j<len;j++){
+      const held=j-ei;
+      if(!isDivGap(data,j,divDates)){
+        if(data[j].l<=catStopPx){i=j;break}
+        if(held>=tier.tsAfter){
+          const tsPx=peak*(1-tier.tsDist/100);
+          if(data[j].l<=tsPx){i=j;break}
+        }
+      }
+      if(data[j].h>peak) peak=data[j].h;
+      if(held>=tier.maxHold){i=j;break}
+    }
+    consec=0;
+  }
+  return signals;
+}
+
+/* ─── Portfolio Simulation Engine (identical to backtest) ─── */
+function simulatePortfolio(signals, allTickerData, allDivDates, maxPos){
+  const costOut=P.commission+P.slippage;
+
+  // Build priceMap: {ticker: {date: bar}}
+  const priceMap={};
+  for(const [ticker,data] of Object.entries(allTickerData)){
+    priceMap[ticker]={};
+    for(const bar of data) priceMap[ticker][bar.d]=bar;
+  }
+
+  // Collect all dates in the simulation window (1 year)
+  const dateSet=new Set();
+  for(const data of Object.values(allTickerData)){
+    const oneYearBars=250;
+    const startIdx=Math.max(0,data.length-oneYearBars);
+    for(let i=startIdx;i<data.length;i++) dateSet.add(data[i].d);
+  }
+  const dates=[...dateSet].sort();
+
+  // Index signals by entry date
+  const sigByDate={};
+  for(const s of signals){
+    if(!sigByDate[s.entryDate]) sigByDate[s.entryDate]=[];
+    sigByDate[s.entryDate].push(s);
+  }
+  for(const d of Object.keys(sigByDate)){
+    sigByDate[d].sort((a,b)=>b.vr-a.vr||a.ticker.localeCompare(b.ticker));
+  }
+
+  let cash=1.0;
+  const positions=[];
+  const trades=[];
+  const equity=[];
+
+  function isDivGapBar(bar,ticker,date){
+    if(allDivDates[ticker]&&allDivDates[ticker].includes(date)) return true;
+    // Heuristic fallback
+    const pm=priceMap[ticker];
+    if(!pm) return false;
+    const allDates=Object.keys(pm).filter(d=>d<date).sort();
+    if(!allDates.length) return false;
+    const prev=pm[allDates[allDates.length-1]];
+    if(!prev||prev.c<=0) return false;
+    const dr=(bar.c/prev.c-1)*100;
+    if(dr>-P.divGap) return false;
+    if(bar.o>=prev.c*(1-P.divGap/100)) return false;
+    return true;
+  }
+
+  for(const d of dates){
+    // --- Exits ---
+    const toClose=[];
+    for(let p=positions.length-1;p>=0;p--){
+      const pos=positions[p];
+      const bar=priceMap[pos.ticker]?.[d];
+      if(!bar){continue}
+      pos.lastPx=bar.c;
+      pos.held++;
+
+      let exitPrice=null,reason=null;
+      const divGap=isDivGapBar(bar,pos.ticker,d);
+
+      if(!divGap){
+        if(bar.l<=pos.catStopPx){exitPrice=pos.catStopPx;reason='cat_stop'}
+        if(!exitPrice&&pos.held>=pos.tier.tsAfter){
+          const tsPx=pos.peak*(1-pos.tier.tsDist/100);
+          if(bar.l<=tsPx){exitPrice=tsPx;reason='trailing_stop'}
+        }
+      }
+      if(bar.h>pos.peak) pos.peak=bar.h;
+      if(!exitPrice&&pos.held>=pos.tier.maxHold){exitPrice=bar.c;reason='max_hold'}
+
+      if(exitPrice!==null){
+        const fe=exitPrice*(1-costOut);
+        const ret=(fe/pos.ep-1)*100;
+        cash+=pos.qty*fe;
+        trades.push({
+          ticker:pos.ticker,tier:pos.tier.name,vr:pos.vr,
+          signalDate:pos.signalDate,entryDate:pos.entryDate,
+          exitDate:d,ep:pos.ep,exitPrice:fe,ret,reason,held:pos.held,
+        });
+        toClose.push(p);
+      }
+    }
+    for(const idx of toClose.sort((a,b)=>b-a)) positions.splice(idx,1);
+
+    // --- Entries ---
+    const daySigs=sigByDate[d];
+    if(daySigs&&daySigs.length){
+      const candidates=[...daySigs];
+
+      // ATR rotation
+      while(positions.length>=maxPos&&candidates.length>0){
+        candidates.sort((a,b)=>b.atr20-a.atr20||b.vr-a.vr);
+        const cand=candidates[0];
+        let weakIdx=-1,weakATR=Infinity;
+        for(let p=0;p<positions.length;p++){
+          const pa=positions[p].atr20;
+          if(pa<weakATR){weakATR=pa;weakIdx=p}
+        }
+        if(weakIdx>=0&&cand.atr20>=weakATR*P.rotMult&&cand.atr20-weakATR>=P.rotAbs){
+          const weak=positions[weakIdx];
+          const bar=priceMap[weak.ticker]?.[d];
+          const px=bar?bar.c:weak.lastPx||weak.ep;
+          const fe=px*(1-costOut);
+          const ret=(fe/weak.ep-1)*100;
+          cash+=weak.qty*fe;
+          trades.push({
+            ticker:weak.ticker,tier:weak.tier.name,vr:weak.vr,
+            signalDate:weak.signalDate,entryDate:weak.entryDate,
+            exitDate:d,ep:weak.ep,exitPrice:fe,ret,reason:'rotate_atr',held:weak.held,
+          });
+          positions.splice(weakIdx,1);
+        }else break;
+      }
+
+      // Enter new positions
+      if(positions.length<maxPos&&candidates.length>0){
+        const slotsAvail=maxPos-positions.length;
+        const toEnter=candidates.slice(0,slotsAvail);
+        const budget=cash;
+        if(budget>0&&toEnter.length>0){
+          const weights=toEnter.map(s=>Math.min(s.vr/3,3));
+          const wSum=weights.reduce((a,b)=>a+b,0);
+          for(let k=0;k<toEnter.length;k++){
+            const s=toEnter[k];
+            const stake=budget*(weights[k]/wSum);
+            const qty=stake/s.ep;
+            if(qty<=0) continue;
+            cash-=qty*s.ep;
+            positions.push({
+              ticker:s.ticker,ep:s.ep,catStopPx:s.catStopPx,
+              tier:s.tier,vr:s.vr,atr20:s.atr20,
+              peak:s.ep,held:0,qty,
+              signalDate:s.signalDate,entryDate:s.entryDate,
+              lastPx:s.ep,
+            });
+          }
+        }
+      }
+    }
+
+    // --- Equity ---
+    let openVal=0;
+    for(const pos of positions){
+      const bar=priceMap[pos.ticker]?.[d];
+      const px=bar?bar.c:pos.lastPx||pos.ep;
+      pos.lastPx=px;
+      openVal+=pos.qty*px;
+    }
+    equity.push({d,eq:(cash+openVal)*100});
+  }
+
+  // Close remaining positions
+  const lastDate=dates[dates.length-1];
+  for(const pos of positions){
+    const px=pos.lastPx||pos.ep;
+    const fe=px*(1-costOut);
+    const ret=(fe/pos.ep-1)*100;
+    trades.push({
+      ticker:pos.ticker,tier:pos.tier.name,vr:pos.vr,
+      signalDate:pos.signalDate,entryDate:pos.entryDate,
+      exitDate:lastDate,ep:pos.ep,exitPrice:fe,ret,reason:'open',held:pos.held,
+    });
+  }
+  return {trades,equity};
+}
+
 /* ─── Progress ─── */
 let progressTotal=0, progressDone=0;
 function showProgress(show){
@@ -528,6 +810,11 @@ async function runScan(){
     resetProgress(tickers.length);
     const todayStr = dateFmt(todayMSK());
 
+    // Store ticker data for portfolio simulation
+    const allTickerData = {};
+    const allDivDates = {};
+    let allPortSigs = [];
+
     const scanResults = await Promise.all(tickers.map(t => sem(async ()=>{
       try{
         let candles = await loadCandles(t.secid);
@@ -547,8 +834,19 @@ async function runScan(){
           }
         }
 
+        // Store for portfolio simulation
+        allTickerData[t.secid] = candles;
+        if(divDates.length>0) allDivDates[t.secid] = divDates;
+
+        // Screener signals (last 10 bars)
         const sigs = scanTicker(candles, divDates);
         sigs.forEach(s=>{ s.secid=t.secid; s.tickerName=t.name; });
+
+        // Full-year signals for portfolio
+        const portSigs = scanTickerFull(candles, divDates);
+        portSigs.forEach(s=>{ s.ticker=t.secid; });
+        allPortSigs.push(...portSigs);
+
         updateProgress(t.secid + (sigs.length ? ` — ${sigs.length} сигнал(ов)` : ''));
         return sigs;
       } catch(e){
@@ -560,6 +858,27 @@ async function runScan(){
 
     allSignals = scanResults.flat();
     renderSignals();
+
+    // Portfolio simulation
+    const s1Sigs = allPortSigs.filter(s=>s.isLiquid);
+    const s2Sigs = allPortSigs.filter(s=>!s.isLiquid);
+    const s1 = simulatePortfolio(s1Sigs, allTickerData, allDivDates, P.maxPos1);
+    const s2 = simulatePortfolio(s2Sigs, allTickerData, allDivDates, P.maxPos2);
+
+    // Combined equity
+    const eqMap={};
+    for(const e of s1.equity) eqMap[e.d]=(eqMap[e.d]||0)+e.eq;
+    for(const e of s2.equity) eqMap[e.d]=(eqMap[e.d]||0)+e.eq;
+    const combinedEq=Object.entries(eqMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,eq])=>({d,eq:eq/2}));
+    const combinedTrades=[...s1.trades,...s2.trades];
+
+    portResults = {
+      combined:{trades:combinedTrades, equity:combinedEq},
+      s1:s1,
+      s2:s2,
+    };
+    document.getElementById('portfolioSection').style.display='block';
+    renderPortfolio();
     updateCacheInfo();
 
   } catch(e){
@@ -668,6 +987,145 @@ function renderSignals(){
       </div>
     </div>`;
   }).join('');
+}
+
+/* ─── Portfolio UI ─── */
+let portResults = {combined:null, s1:null, s2:null};
+let activePortTab = 'combined';
+
+function switchPortTab(tab){
+  activePortTab=tab;
+  document.querySelectorAll('.port-tab').forEach((el,i)=>{
+    el.classList.toggle('active', ['combined','s1','s2'][i]===tab);
+  });
+  renderPortfolio();
+}
+
+function renderPortfolio(){
+  const r=portResults[activePortTab];
+  if(!r) return;
+  const {trades,equity}=r;
+
+  // Stats
+  const closed=trades.filter(t=>t.reason!=='open');
+  const open=trades.filter(t=>t.reason==='open');
+  const wins=closed.filter(t=>t.ret>0);
+  const wr=closed.length?((wins.length/closed.length)*100).toFixed(1):'—';
+  const avgRet=closed.length?(closed.reduce((s,t)=>s+t.ret,0)/closed.length).toFixed(2):'—';
+  const totalRet=equity.length?((equity[equity.length-1].eq-100)).toFixed(1):'—';
+  const maxDD=calcMaxDD(equity);
+  const grossWin=wins.reduce((s,t)=>s+t.ret,0);
+  const grossLoss=Math.abs(closed.filter(t=>t.ret<=0).reduce((s,t)=>s+t.ret,0));
+  const pf=grossLoss>0?(grossWin/grossLoss).toFixed(2):'∞';
+
+  document.getElementById('portStats').innerHTML=`
+    <div class="port-stat"><div class="stat-label">Доходность</div><div class="stat-val" style="color:${parseFloat(totalRet)>=0?'var(--green)':'var(--red)'}">${totalRet}%</div></div>
+    <div class="port-stat"><div class="stat-label">Сделок</div><div class="stat-val">${closed.length}</div></div>
+    <div class="port-stat"><div class="stat-label">Открыто</div><div class="stat-val">${open.length}</div></div>
+    <div class="port-stat"><div class="stat-label">Win Rate</div><div class="stat-val">${wr}%</div></div>
+    <div class="port-stat"><div class="stat-label">Avg Ret</div><div class="stat-val">${avgRet}%</div></div>
+    <div class="port-stat"><div class="stat-label">PF</div><div class="stat-val">${pf}</div></div>
+    <div class="port-stat"><div class="stat-label">Max DD</div><div class="stat-val" style="color:var(--red)">${maxDD}%</div></div>
+  `;
+
+  // Open positions
+  if(open.length>0){
+    document.getElementById('portPositions').innerHTML=`<h3>Открытые позиции</h3>
+      <table class="port-trades"><thead><tr><th>Тикер</th><th>Тир</th><th>Вход</th><th>Дата входа</th><th>P/L</th><th>Дней</th></tr></thead>
+      <tbody>${open.map(t=>`<tr>
+        <td><b>${t.ticker}</b></td><td>${t.tier}</td>
+        <td>${t.ep.toFixed(2)}</td><td>${t.entryDate}</td>
+        <td class="${t.ret>=0?'ret-pos':'ret-neg'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td>
+        <td>${t.held}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } else {
+    document.getElementById('portPositions').innerHTML='';
+  }
+
+  // Equity chart
+  drawEquity(equity);
+
+  // Trades table
+  document.getElementById('portTradesHead').innerHTML=`<tr><th>Тикер</th><th>Тир</th><th>VR</th><th>Вход</th><th>Выход</th><th>Дата входа</th><th>Дата выхода</th><th>Ret%</th><th>Причина</th><th>Дней</th></tr>`;
+  const sorted=[...trades].sort((a,b)=>b.entryDate.localeCompare(a.entryDate));
+  document.getElementById('portTradesBody').innerHTML=sorted.map(t=>`<tr>
+    <td><b>${t.ticker}</b></td><td>${t.tier}</td><td>${t.vr.toFixed(1)}</td>
+    <td>${t.ep.toFixed(2)}</td><td>${t.exitPrice.toFixed(2)}</td>
+    <td>${t.entryDate}</td><td>${t.exitDate}</td>
+    <td class="${t.ret>=0?'ret-pos':'ret-neg'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td>
+    <td>${t.reason}</td><td>${t.held}</td>
+  </tr>`).join('');
+}
+
+function calcMaxDD(equity){
+  let peak=0,maxDD=0;
+  for(const e of equity){
+    if(e.eq>peak) peak=e.eq;
+    const dd=(peak-e.eq)/peak*100;
+    if(dd>maxDD) maxDD=dd;
+  }
+  return maxDD.toFixed(1);
+}
+
+function drawEquity(equity){
+  const canvas=document.getElementById('equityCanvas');
+  const ctx=canvas.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width*dpr;
+  canvas.height=200*dpr;
+  canvas.style.width=rect.width+'px';
+  canvas.style.height='200px';
+  ctx.scale(dpr,dpr);
+  const W=rect.width, H=200;
+
+  ctx.fillStyle='#16213e';
+  ctx.fillRect(0,0,W,H);
+
+  if(equity.length<2) return;
+
+  const vals=equity.map(e=>e.eq);
+  const minV=Math.min(...vals)*0.995;
+  const maxV=Math.max(...vals)*1.005;
+  const range=maxV-minV||1;
+
+  // Grid lines
+  ctx.strokeStyle='#2a2a4a';
+  ctx.lineWidth=0.5;
+  for(let i=0;i<5;i++){
+    const y=H*0.05+i*(H*0.9/4);
+    ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(W-10,y);ctx.stroke();
+    const val=maxV-(i/4)*range;
+    ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillText(val.toFixed(0)+'%',36,y+3);
+  }
+
+  // Equity line
+  ctx.strokeStyle='#e94560';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  for(let i=0;i<equity.length;i++){
+    const x=40+(W-50)*i/(equity.length-1);
+    const y=H*0.05+(1-(vals[i]-minV)/range)*(H*0.9);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // 100% baseline
+  if(100>=minV&&100<=maxV){
+    const y100=H*0.05+(1-(100-minV)/range)*(H*0.9);
+    ctx.strokeStyle='#ffffff44';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(40,y100);ctx.lineTo(W-10,y100);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Date labels
+  ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='center';
+  const step=Math.max(1,Math.floor(equity.length/6));
+  for(let i=0;i<equity.length;i+=step){
+    const x=40+(W-50)*i/(equity.length-1);
+    ctx.fillText(equity[i].d.slice(5),x,H-2);
+  }
 }
 
 /* ─── Auto-refresh ─── */
