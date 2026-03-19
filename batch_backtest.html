@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Batch Backtest V6</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="engine.js"></script>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);font-size:14px}
+header{background:var(--surface);padding:12px 24px;display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--border)}
+header h1{font-size:20px;font-weight:600}
+header .subtitle{color:var(--muted);font-size:13px}
+.container{max-width:1600px;margin:0 auto;padding:16px}
+.panel{background:var(--surface);border-radius:8px;padding:16px;margin-bottom:16px;border:1px solid var(--border)}
+.panel h3{margin-bottom:12px;font-size:14px;color:var(--accent)}
+textarea{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:10px;border-radius:6px;font-family:'Consolas','Monaco',monospace;font-size:12px;resize:vertical;min-height:200px;line-height:1.5}
+textarea:focus{outline:none;border-color:var(--accent)}
+.btn{background:var(--accent);color:#fff;border:none;padding:10px 28px;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.btn:hover{opacity:0.85}
+.btn:disabled{opacity:0.4;cursor:not-allowed}
+.btn-sm{padding:6px 14px;font-size:12px;border-radius:4px}
+.btn-outline{background:transparent;border:1px solid var(--border);color:var(--muted);font-weight:400}
+.btn-outline:hover{border-color:var(--accent);color:var(--text)}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.progress-bar{background:var(--surface);border-radius:8px;padding:12px 16px;margin-bottom:16px;display:none;border:1px solid var(--border)}
+.progress-bar .bar{background:var(--bg);border-radius:4px;height:8px;overflow:hidden;margin-top:6px}
+.progress-bar .fill{background:var(--accent);height:100%;transition:width .3s;width:0}
+.hint{font-size:11px;color:var(--muted);line-height:1.5;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:11px}
+th{background:var(--card);padding:6px 5px;text-align:left;font-weight:600;position:sticky;top:0;cursor:pointer;user-select:none;white-space:nowrap}
+td{padding:5px;border-bottom:1px solid var(--border);white-space:nowrap}
+tr:hover td{background:rgba(233,69,96,0.05)}
+.tbl-wrap{background:var(--surface);border-radius:8px;border:1px solid var(--border);overflow:auto;max-height:600px;margin-bottom:16px}
+.tbl-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px}
+.tbl-header h3{font-size:14px}
+.pos{color:var(--green)}.neg{color:var(--red)}
+.best{background:rgba(0,184,148,0.15)}
+.charts-wrap{display:grid;grid-template-columns:1fr;gap:16px;margin-bottom:16px}
+.chart-box{background:var(--surface);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.chart-box h4{font-size:12px;color:var(--muted);margin-bottom:8px}
+.chart-box canvas{width:100%!important;max-height:350px}
+.tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600}
+.tag-confirmed{background:var(--green);color:#000}
+.tag-degrading{background:var(--red);color:#fff}
+.tag-insufficient{background:#636e72;color:#fff}
+.hidden{display:none!important}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:8px}
+.cache-info{font-size:11px;color:var(--muted);margin-left:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>Batch Backtest V6</h1>
+  <span class="subtitle">Пакетный прогон с сеткой параметров</span>
+</header>
+<div class="container">
+
+  <div class="panel">
+    <h3>Сетка параметров (JSON)</h3>
+    <div class="hint">
+      Задайте параметры для перебора. Каждый ключ — массив значений. Все комбинации будут прогнаны автоматически.<br>
+      Ключи совпадают с параметрами бэктеста: volMin, maxVr, atrMin, cpMin, stopPct, rebal, vrConfirm, gapCancel, maxPos1, maxPos2, и т.д.<br>
+      Параметры не указанные в сетке берутся из дефолтов V6 (volMin=3.6, atrMin=1.5, cpMin=0.45, stopPct=28, ...).<br>
+      <b>commission/slippage</b> — в долях (0.0005 = 0.05%). <b>liq</b> — в рублях (100e6 = 100 млн).
+    </div>
+    <textarea id="gridJson">{
+  "volMin":    [3.6],
+  "atrMin":    [1.3, 1.5, 1.8],
+  "cpMin":     [0.45, 0.55],
+  "stopPct":   [22, 28],
+  "rebal":     ["none"]
+}</textarea>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn" id="btnRun">▶ Запустить пакет</button>
+    <button class="btn btn-sm btn-outline" id="btnClearCache">Очистить кэш</button>
+    <button class="btn btn-sm btn-outline hidden" id="btnCsvAll">CSV сводка</button>
+    <span class="cache-info" id="cacheInfo"></span>
+  </div>
+
+  <div class="progress-bar" id="progressBox">
+    <span id="progressText">Загрузка данных...</span>
+    <div class="bar"><div class="fill" id="progressFill"></div></div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div class="tbl-wrap">
+      <div class="tbl-header">
+        <h3>Результаты всех прогонов</h3>
+      </div>
+      <table id="tblResults"><thead></thead><tbody></tbody></table>
+    </div>
+    <div class="charts-wrap">
+      <div class="chart-box"><h4>Equity Curves — все прогоны</h4><canvas id="chartEquity"></canvas></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   DATA LOADING (same as backtest_v6.html)
+   ═══════════════════════════════════════════════════════════════════════ */
+const MOEX = 'https://iss.moex.com/iss';
+const CACHE_TTL = 24*60*60*1000;
+const CACHE_PREFIX = 'bt6_';
+
+function cacheGet(key) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
+    if (!raw) return null;
+    const { ts, data } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) { localStorage.removeItem(CACHE_PREFIX + key); return null; }
+    return data;
+  } catch(e) { return null; }
+}
+function cacheSet(key, data) {
+  try { localStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ ts: Date.now(), data })); } catch(e) {}
+}
+function cacheClear() {
+  const keys = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith(CACHE_PREFIX)) keys.push(k);
+  }
+  keys.forEach(k => localStorage.removeItem(k));
+}
+function cacheStats() {
+  let count = 0, bytes = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith(CACHE_PREFIX)) { count++; bytes += localStorage.getItem(k).length * 2; }
+  }
+  return { count, mb: (bytes / 1048576).toFixed(1) };
+}
+function updateCacheInfo() {
+  const s = cacheStats();
+  document.getElementById('cacheInfo').textContent =
+    s.count > 0 ? `Кэш: ${s.count} тикеров, ${s.mb} MB` : 'Кэш пуст';
+}
+
+class Semaphore {
+  constructor(n) { this.max = n; this.cnt = 0; this.q = []; }
+  async acquire() { if (this.cnt < this.max) { this.cnt++; return; } await new Promise(r => this.q.push(r)); this.cnt++; }
+  release() { this.cnt--; if (this.q.length) this.q.shift()(); }
+}
+const sem = new Semaphore(8);
+
+async function fetchRetry(url, retries, backoff) {
+  if (retries === undefined) retries = 2;
+  if (backoff === undefined) backoff = 300;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const c = new AbortController(); const t = setTimeout(() => c.abort(), 20000);
+      const r = await fetch(url, { signal: c.signal }); clearTimeout(t);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return await r.json();
+    } catch(e) { if (i === retries) throw e; await new Promise(r => setTimeout(r, backoff * (i + 1))); }
+  }
+}
+
+async function loadTickerList() {
+  const cached = cacheGet('_tickers');
+  if (cached) return cached;
+  const url = MOEX + '/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=securities&securities.columns=SECID,SHORTNAME,LISTLEVEL';
+  const d = await fetchRetry(url);
+  const tickers = d.securities.data.filter(r => r[2] >= 1 && r[2] <= 3 && !BLACKLIST.has(r[0])).map(r => r[0]);
+  cacheSet('_tickers', tickers);
+  return tickers;
+}
+
+async function loadCandles(ticker, fromDate) {
+  const cacheKey = 'candles_' + ticker + '_' + fromDate;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+  await sem.acquire();
+  try {
+    let all = [], start = 0;
+    while (true) {
+      const url = MOEX + '/engines/stock/markets/shares/boards/TQBR/securities/' + ticker + '/candles.json?interval=24&from=' + fromDate + '&iss.meta=off&iss.only=candles&candles.columns=begin,open,close,high,low,volume&start=' + start;
+      const d = await fetchRetry(url);
+      const rows = d.candles.data;
+      if (!rows.length) break;
+      for (const r of rows) all.push({ d: r[0].slice(0, 10), o: +r[1], c: +r[2], h: +r[3], l: +r[4], v: +r[5] });
+      if (rows.length < 500) break;
+      start += 500;
+    }
+    if (all.length >= MIN_BARS) cacheSet(cacheKey, all);
+    return all;
+  } finally { sem.release(); }
+}
+
+async function loadDividendsForTicker(ticker) {
+  const cacheKey = 'div_' + ticker;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+  await sem.acquire();
+  try {
+    const url = MOEX + '/securities/' + ticker + '/dividends.json?iss.meta=off';
+    const d = await fetchRetry(url);
+    const cols = d.dividends.columns, rows = d.dividends.data;
+    const ri = cols.indexOf('registryclosedate');
+    const dates = [];
+    for (const r of rows) { if (r[ri]) dates.push(r[ri]); }
+    if (dates.length > 0) cacheSet(cacheKey, dates);
+    return dates;
+  } catch(e) { return []; }
+  finally { sem.release(); }
+}
+
+async function loadAllDividends(tickers, progressFn) {
+  DIV_EXDATES = {};
+  let done = 0;
+  const total = tickers.length;
+  const tasks = tickers.map(async tk => {
+    const dates = await loadDividendsForTicker(tk);
+    if (dates.length > 0) DIV_EXDATES[tk] = new Set(dates);
+    done++;
+    if (done % 20 === 0 || done === total) progressFn(done, total);
+  });
+  await Promise.all(tasks);
+}
+
+function progress(text, pct) {
+  const box = document.getElementById('progressBox');
+  box.style.display = 'block';
+  document.getElementById('progressText').textContent = text;
+  document.getElementById('progressFill').style.width = pct + '%';
+}
+
+async function loadAllData(startYear) {
+  progress('Загрузка тикеров...', 0);
+  const tickers = await loadTickerList();
+  progress(tickers.length + ' тикеров. Загрузка дивидендов...', 2);
+  await loadAllDividends(tickers, (done, total) => {
+    progress('Дивиденды: ' + done + '/' + total, 2 + done / total * 8);
+  });
+  progress(tickers.length + ' тикеров. Загрузка свечей...', 10);
+  const fromDate = (startYear - 1) + '-01-01';
+  const tickerData = {};
+  let done = 0, fromCache = 0;
+  const total = tickers.length;
+  const tasks = tickers.map(async tk => {
+    try {
+      const wasCached = !!cacheGet('candles_' + tk + '_' + fromDate);
+      const bars = await loadCandles(tk, fromDate);
+      if (bars.length >= MIN_BARS) { tickerData[tk] = bars; if (wasCached) fromCache++; }
+    } catch(e) {}
+    done++;
+    if (done % 10 === 0 || done === total)
+      progress('Свечи: ' + done + '/' + total + ' (кэш: ' + fromCache + ')', 10 + done / total * 65);
+  });
+  await Promise.all(tasks);
+  progress('Данные загружены!', 80);
+  updateCacheInfo();
+  return tickerData;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRID GENERATION — cartesian product of parameter arrays
+   ═══════════════════════════════════════════════════════════════════════ */
+function cartesian(grid) {
+  const keys = Object.keys(grid);
+  if (!keys.length) return [{}];
+  const result = [];
+  function go(i, current) {
+    if (i === keys.length) { result.push({ ...current }); return; }
+    const k = keys[i];
+    for (const v of grid[k]) { current[k] = v; go(i + 1, current); }
+  }
+  go(0, {});
+  return result;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MAIN — batch run
+   ═══════════════════════════════════════════════════════════════════════ */
+let equityChart = null;
+
+async function runBatch() {
+  let grid;
+  try {
+    grid = JSON.parse(document.getElementById('gridJson').value);
+  } catch(e) {
+    alert('Ошибка JSON: ' + e.message);
+    return;
+  }
+
+  // Ensure all values are arrays
+  for (const k of Object.keys(grid)) {
+    if (!Array.isArray(grid[k])) grid[k] = [grid[k]];
+  }
+
+  const combos = cartesian(grid);
+  if (!combos.length) { alert('Нет комбинаций'); return; }
+
+  const btn = document.getElementById('btnRun');
+  btn.disabled = true;
+  document.getElementById('results').classList.add('hidden');
+  if (equityChart) { equityChart.destroy(); equityChart = null; }
+
+  try {
+    // Determine startYear from grid or default
+    const startYear = grid.startYear ? Math.min(...grid.startYear) : 2015;
+
+    // Load data once
+    const tickerData = await loadAllData(startYear);
+    const priceMap = buildPriceMap(tickerData);
+    const allDates = buildDateList(tickerData, (startYear) + '-01-01');
+
+    const results = [];
+
+    for (let i = 0; i < combos.length; i++) {
+      const override = combos[i];
+      const cfg = defaultCfg();
+
+      // Apply overrides
+      for (const [k, v] of Object.entries(override)) {
+        if (k === 'commission' || k === 'slippage') {
+          cfg[k] = v; // already in decimal
+        } else {
+          cfg[k] = v;
+        }
+      }
+
+      // Ensure tiers are sorted desc
+      cfg.tiers.sort((a, b) => b.minVr - a.minVr);
+
+      progress('Прогон ' + (i + 1) + '/' + combos.length + ': ' + JSON.stringify(override), 80 + (i / combos.length) * 18);
+
+      // Yield to UI
+      await new Promise(r => setTimeout(r, 0));
+
+      const result = runBacktestEngine(cfg, tickerData, priceMap, allDates);
+      if (result) {
+        result.label = '#' + (i + 1);
+        result.overrides = override;
+        results.push(result);
+      }
+    }
+
+    if (!results.length) {
+      progress('Нет результатов (все прогоны без сделок)', 100);
+      btn.disabled = false;
+      return;
+    }
+
+    // Render
+    document.getElementById('results').classList.remove('hidden');
+    document.getElementById('btnCsvAll').classList.remove('hidden');
+    renderResultsTable(results);
+    renderEquityChartAll(results);
+    document.getElementById('btnCsvAll').onclick = () => exportSummaryCSV(results);
+
+    progress('Готово! ' + results.length + ' прогонов', 100);
+  } catch(e) {
+    progress('Ошибка: ' + e.message, 0);
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RENDERING
+   ═══════════════════════════════════════════════════════════════════════ */
+function renderResultsTable(results) {
+  const tbl = document.getElementById('tblResults');
+
+  // Collect all override keys for columns
+  const overrideKeys = new Set();
+  for (const r of results) {
+    for (const k of Object.keys(r.overrides)) overrideKeys.add(k);
+  }
+  const okArr = [...overrideKeys];
+
+  // Find best by different metrics
+  const bestSharpe = Math.max(...results.map(r => r.stats.sharpe));
+  const bestWR = Math.max(...results.map(r => r.stats.wr));
+  const bestPF = Math.max(...results.map(r => r.stats.pf));
+  const bestAvg = Math.max(...results.map(r => r.stats.avg));
+  const lowestDD = Math.min(...results.map(r => r.maxDD));
+
+  let hdr = '<tr><th>#</th>';
+  for (const k of okArr) hdr += '<th>' + k + '</th>';
+  hdr += '<th>Сделок</th><th>WR%</th><th>Avg%</th><th>Med%</th><th>PF</th><th>Sharpe</th><th>MaxDD%</th><th>Total%</th><th>CAGR%</th><th>OOS</th><th>AvgHold</th></tr>';
+  tbl.querySelector('thead').innerHTML = hdr;
+
+  let body = '';
+  for (const r of results) {
+    const s = r.stats;
+    const isBest = s.sharpe === bestSharpe;
+    body += '<tr' + (isBest ? ' class="best"' : '') + '>';
+    body += '<td><b>' + r.label + '</b></td>';
+    for (const k of okArr) body += '<td>' + (r.overrides[k] ?? '') + '</td>';
+    body += '<td>' + s.n + '</td>';
+    body += '<td class="' + (s.wr >= 50 ? 'pos' : 'neg') + '">' + s.wr.toFixed(1) + '</td>';
+    body += '<td class="' + (s.avg > 0 ? 'pos' : 'neg') + '">' + s.avg.toFixed(2) + '</td>';
+    body += '<td class="' + (s.med > 0 ? 'pos' : 'neg') + '">' + s.med.toFixed(2) + '</td>';
+    body += '<td class="' + (s.pf > 1 ? 'pos' : 'neg') + '">' + s.pf.toFixed(2) + '</td>';
+    body += '<td class="' + (s.sharpe > 0 ? 'pos' : 'neg') + '">' + s.sharpe.toFixed(2) + '</td>';
+    body += '<td class="neg">' + r.maxDD.toFixed(1) + '</td>';
+    body += '<td class="' + (r.totalReturn > 0 ? 'pos' : 'neg') + '">' + r.totalReturn.toFixed(1) + '</td>';
+    body += '<td class="' + (r.cagr > 0 ? 'pos' : 'neg') + '">' + r.cagr.toFixed(1) + '</td>';
+    const vc = r.oos.verdict.toLowerCase();
+    body += '<td><span class="tag tag-' + vc + '">' + r.oos.verdict + '</span></td>';
+    body += '<td>' + s.avgHold.toFixed(1) + '</td>';
+    body += '</tr>';
+  }
+  tbl.querySelector('tbody').innerHTML = body;
+
+  // Sort by clicking headers
+  const ths = tbl.querySelectorAll('th');
+  ths.forEach((th, ci) => {
+    th.onclick = () => {
+      const rows = [...tbl.querySelector('tbody').children];
+      const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+      th.dataset.dir = dir;
+      rows.sort((a, b) => {
+        let va = a.children[ci].textContent, vb = b.children[ci].textContent;
+        const na = parseFloat(va), nb = parseFloat(vb);
+        if (!isNaN(na) && !isNaN(nb)) return dir === 'asc' ? na - nb : nb - na;
+        return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+      });
+      const tbody = tbl.querySelector('tbody');
+      for (const r of rows) tbody.appendChild(r);
+    };
+  });
+}
+
+function renderEquityChartAll(results) {
+  const ctx = document.getElementById('chartEquity').getContext('2d');
+  const colors = ['#e94560','#00b894','#0984e3','#6c5ce7','#fdcb6e','#e17055','#00cec9','#a29bfe','#fab1a0','#55efc4','#74b9ff','#ff7675'];
+  const datasets = results.map((r, i) => ({
+    label: r.label + ' (' + JSON.stringify(r.overrides).slice(0, 60) + ')',
+    data: r.equity.filter((_, j) => j % Math.max(1, Math.floor(r.equity.length / 500)) === 0).map(p => ({ x: p.d, y: p.eq })),
+    borderColor: colors[i % colors.length],
+    borderWidth: 1.5,
+    pointRadius: 0,
+    fill: false,
+    tension: 0.1,
+  }));
+  equityChart = new Chart(ctx, {
+    type: 'line',
+    data: { datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: '#eee', font: { size: 9 } }, position: 'bottom' } },
+      scales: {
+        x: { type: 'category', ticks: { color: '#999', maxTicksLimit: 12, font: { size: 9 } }, grid: { color: '#2a2a4a' } },
+        y: { ticks: { color: '#999', font: { size: 9 } }, grid: { color: '#2a2a4a' } },
+      },
+    },
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CSV EXPORT — summary of all runs
+   ═══════════════════════════════════════════════════════════════════════ */
+function exportSummaryCSV(results) {
+  const esc = v => { const s = String(v ?? ''); return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s; };
+
+  const overrideKeys = new Set();
+  for (const r of results) for (const k of Object.keys(r.overrides)) overrideKeys.add(k);
+  const okArr = [...overrideKeys];
+
+  const hdr = ['#', ...okArr, 'Trades', 'WR%', 'Avg%', 'Med%', 'PF', 'Sharpe', 'MaxDD%', 'Total%', 'CAGR%', 'OOS', 'AvgHold'];
+  const lines = [hdr.join(',')];
+
+  for (const r of results) {
+    const s = r.stats;
+    const row = [
+      r.label,
+      ...okArr.map(k => esc(r.overrides[k] ?? '')),
+      s.n, s.wr.toFixed(1), s.avg.toFixed(2), s.med.toFixed(2),
+      s.pf.toFixed(2), s.sharpe.toFixed(2), r.maxDD.toFixed(1),
+      r.totalReturn.toFixed(1), r.cagr.toFixed(1), r.oos.verdict,
+      s.avgHold.toFixed(1),
+    ];
+    lines.push(row.join(','));
+  }
+
+  const csv = lines.join('\n');
+  const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'batch_backtest_' + new Date().toISOString().slice(0, 10) + '.csv';
+  a.click();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════════════════════════════════════ */
+document.getElementById('btnRun').addEventListener('click', runBatch);
+document.getElementById('btnClearCache').addEventListener('click', () => {
+  cacheClear(); updateCacheInfo(); alert('Кэш очищен!');
+});
+updateCacheInfo();
+</script>
+</body>
+</html>
