@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOEX Screener — Insides Without Inside</title>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh}
+a{color:var(--accent);text-decoration:none}
+
+header{background:var(--surface);padding:18px 24px;border-bottom:2px solid var(--accent)}
+header h1{font-size:1.6rem;font-weight:700;letter-spacing:1px}
+header .subtitle{color:var(--muted);font-size:.85rem;margin-top:2px}
+
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border)}
+.toolbar button{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.9rem;font-weight:600;transition:opacity .2s}
+.toolbar button:hover{opacity:.85}
+.toolbar button:disabled{opacity:.4;cursor:not-allowed}
+.toolbar .btn-secondary{background:var(--border);color:var(--text)}
+.toolbar label{display:flex;align-items:center;gap:5px;font-size:.85rem;color:var(--muted);cursor:pointer}
+.toolbar label input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
+.toolbar .status-pill{padding:4px 12px;border-radius:12px;font-size:.8rem;font-weight:600}
+.toolbar .status-open{background:#00b89433;color:var(--green);border:1px solid var(--green)}
+.toolbar .status-closed{background:#e1705533;color:var(--red);border:1px solid var(--red)}
+.toolbar .cache-info{font-size:.78rem;color:var(--muted);margin-left:auto}
+
+.filter-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 24px;background:var(--bg);border-bottom:1px solid var(--border)}
+.filter-bar .group-label{font-size:.8rem;color:var(--muted);margin-right:2px}
+.chip{padding:5px 14px;border-radius:16px;font-size:.82rem;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--muted);transition:all .15s}
+.chip:hover{border-color:var(--accent);color:var(--text)}
+.chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.filter-bar .sep{width:1px;height:24px;background:var(--border);margin:0 4px}
+
+.progress-wrap{padding:0 24px;margin-top:10px;display:none}
+.progress-wrap.visible{display:block}
+.progress-bar-outer{background:var(--border);border-radius:6px;height:8px;overflow:hidden}
+.progress-bar-inner{background:var(--accent);height:100%;width:0;transition:width .3s;border-radius:6px}
+.progress-text{font-size:.78rem;color:var(--muted);margin-top:4px;text-align:center}
+
+.summary{padding:14px 24px;font-size:.95rem;color:var(--muted)}
+.summary span{color:var(--text);font-weight:600}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(370px,1fr));gap:16px;padding:0 24px 40px}
+
+.card{background:var(--card);border-radius:10px;padding:16px 18px;border:1px solid var(--border);transition:border-color .2s}
+.card:hover{border-color:var(--accent)}
+.card-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.card-ticker{font-size:1.3rem;font-weight:700;letter-spacing:.5px}
+.card-name{font-size:.8rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tier-badge{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.tier-ULTRA{background:#9b59b644;color:#c39bd3;border:1px solid #9b59b6}
+.tier-STRONG{background:#3498db44;color:#85c1e9;border:1px solid #3498db}
+.tier-BASE{background:#7f8c8d44;color:#bdc3c7;border:1px solid #7f8c8d}
+.strat-badge{padding:2px 8px;border-radius:8px;font-size:.7rem;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--border)}
+
+.card-body{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:.82rem;margin-bottom:10px}
+.card-body .lbl{color:var(--muted)}
+.card-body .val{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.val-vr{color:#f1c40f;font-size:.95rem}
+.val-green{color:var(--green)}
+.val-red{color:var(--red)}
+
+.card-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:8px;border-top:1px solid var(--border)}
+.freshness{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:600}
+.fresh-today{background:#00b89433;color:var(--green)}
+.fresh-yesterday{background:#f39c1233;color:#f1c40f}
+.fresh-old{background:#7f8c8d33;color:#bdc3c7}
+.t1-status{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:600}
+.t1-confirmed{background:#00b89433;color:var(--green)}
+.t1-pending{background:#e67e2233;color:#f0932b}
+
+.empty-state{text-align:center;padding:60px 24px;color:var(--muted);font-size:1rem}
+
+/* Portfolio section */
+.portfolio-section{padding:0 24px 40px}
+.portfolio-section h2{font-size:1.3rem;margin:24px 0 12px;border-bottom:2px solid var(--accent);padding-bottom:8px}
+.port-tabs{display:flex;gap:0;margin-bottom:16px}
+.port-tab{padding:8px 20px;background:var(--surface);border:1px solid var(--border);cursor:pointer;font-size:.85rem;color:var(--muted);transition:all .15s}
+.port-tab:first-child{border-radius:8px 0 0 8px}
+.port-tab:last-child{border-radius:0 8px 8px 0}
+.port-tab.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.port-stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+.port-stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;text-align:center}
+.port-stat .stat-label{font-size:.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.port-stat .stat-val{font-size:1.2rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+.port-equity{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;overflow-x:auto}
+.port-equity canvas{width:100%;height:200px}
+.port-trades{width:100%;border-collapse:collapse;font-size:.8rem}
+.port-trades th{background:var(--surface);color:var(--muted);padding:8px 10px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);position:sticky;top:0}
+.port-trades td{padding:6px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+.port-trades tr:hover{background:var(--surface)}
+.port-trades .ret-pos{color:var(--green);font-weight:600}
+.port-trades .ret-neg{color:var(--red);font-weight:600}
+.port-trades-wrap{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px}
+.port-positions{margin-bottom:16px}
+.port-positions h3{font-size:.95rem;color:var(--muted);margin-bottom:8px}
+
+@media(max-width:800px){
+  .grid{grid-template-columns:1fr}
+  .toolbar,.filter-bar{gap:6px;padding:8px 12px}
+  header{padding:12px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MOEX Screener</h1>
+  <div class="subtitle">Insides Without Inside — Сигналы в реальном времени</div>
+</header>
+
+<div class="toolbar">
+  <button id="btnScan" onclick="runScan()">Сканировать</button>
+  <label><input type="checkbox" id="chkAuto" onchange="toggleAutoRefresh()"> Авто-обновление (5 мин)</label>
+  <button class="btn-secondary" onclick="clearCache()">Очистить кэш</button>
+  <div id="marketStatus" class="status-pill status-closed">Рынок закрыт</div>
+  <div class="cache-info" id="cacheInfo"></div>
+</div>
+
+<div class="filter-bar">
+  <span class="group-label">Тир:</span>
+  <span class="chip active" data-filter="tier" data-val="ALL" onclick="setFilter(this)">Все</span>
+  <span class="chip" data-filter="tier" data-val="ULTRA" onclick="setFilter(this)">ULTRA</span>
+  <span class="chip" data-filter="tier" data-val="STRONG" onclick="setFilter(this)">STRONG</span>
+  <span class="chip" data-filter="tier" data-val="BASE" onclick="setFilter(this)">BASE</span>
+  <div class="sep"></div>
+  <span class="group-label">T+1:</span>
+  <span class="chip active" data-filter="t1" data-val="ALL" onclick="setFilter(this)">Все</span>
+  <span class="chip" data-filter="t1" data-val="CONFIRMED" onclick="setFilter(this)">Подтверждённые</span>
+  <span class="chip" data-filter="t1" data-val="PENDING" onclick="setFilter(this)">Ожидающие</span>
+  <div class="sep"></div>
+  <span class="group-label">Сорт:</span>
+  <span class="chip active" data-filter="sort" data-val="vr" onclick="setFilter(this)">VR ↓</span>
+  <span class="chip" data-filter="sort" data-val="date" onclick="setFilter(this)">Дата</span>
+  <span class="chip" data-filter="sort" data-val="atr" onclick="setFilter(this)">ATR%</span>
+</div>
+
+<div class="progress-wrap" id="progressWrap">
+  <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
+  <div class="progress-text" id="progressText">Загрузка...</div>
+</div>
+
+<div class="summary" id="summary"></div>
+<div class="grid" id="grid"></div>
+<div class="empty-state" id="emptyState" style="display:none">Нет сигналов. Нажмите «Сканировать» для поиска.</div>
+
+<div class="portfolio-section" id="portfolioSection" style="display:none">
+  <h2>Модельный портфель (последний год)</h2>
+  <div class="port-tabs">
+    <div class="port-tab active" onclick="switchPortTab('combined')">Общий</div>
+    <div class="port-tab" onclick="switchPortTab('s1')">S1 (ликвидные)</div>
+    <div class="port-tab" onclick="switchPortTab('s2')">S2 (неликвидные)</div>
+  </div>
+  <div class="port-stats" id="portStats"></div>
+  <div class="port-positions" id="portPositions"></div>
+  <div class="port-equity"><canvas id="equityCanvas" height="200"></canvas></div>
+  <div class="port-trades-wrap"><table class="port-trades"><thead id="portTradesHead"></thead><tbody id="portTradesBody"></tbody></table></div>
+</div>
+
+<script>
+/* ─── Strategy Parameters (hardcoded, identical to backtest) ─── */
+const P = {
+  volMin:3.6, maxVr:10, sigDays:1,
+  atrMin:1.8, atrWin:20, maPeriod:50,
+  maFilter:'above', bullBar:true,
+  cpMin:0.55, maxDayRet:10,
+  vrConfirm:2.0, gapCancel:6,
+  volWin:60, liq:100e6,
+  stopPct:28, divGap:3,
+  commission:0.0005, slippage:0.001,
+  rotMult:1.5, rotAbs:0.5,
+  maxPos1:2, maxPos2:2,
+  tiers:[
+    {name:'ULTRA', minVr:7.0, maxHold:15, tsAfter:6, tsDist:2.6},
+    {name:'STRONG',minVr:6.5, maxHold:13, tsAfter:6, tsDist:1.8},
+    {name:'BASE',  minVr:3.6, maxHold:10, tsAfter:5, tsDist:1.4},
+  ]
+};
+const BLACKLIST = ['MOEX','IRAO','FEES'];
+const HISTORY_FROM = '2023-01-15';
+const ISS = 'https://iss.moex.com/iss';
+const CACHE_PREFIX = 'scr_';
+const CACHE_TTL = 6 * 3600 * 1000;
+const MAX_PARALLEL = 25;
+const MIN_BARS = 100;
+const SCAN_WINDOW = 10;
+
+/* ─── State ─── */
+let allSignals = [];
+let filters = {tier:'ALL', t1:'ALL', sort:'vr'};
+let autoTimer = null;
+let scanning = false;
+
+/* ─── Helpers ─── */
+function todayMSK(){
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Europe/Moscow',
+    year:'numeric',month:'2-digit',day:'2-digit',
+    hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false
+  }).formatToParts(now);
+  const get=t=>parts.find(p=>p.type===t).value;
+  return new Date(+get('year'),+get('month')-1,+get('day'),+get('hour'),+get('minute'),+get('second'));
+}
+function dateFmt(d){ return d.toISOString().slice(0,10); }
+function isMarketOpen(){
+  const m = todayMSK();
+  const dow = m.getDay();
+  if(dow===0||dow===6) return false;
+  const mins = m.getHours()*60+m.getMinutes();
+  return mins>=590 && mins<=1130; // 09:50=590, 18:50=1130
+}
+function updateMarketStatus(){
+  const el = document.getElementById('marketStatus');
+  if(isMarketOpen()){
+    el.textContent='Рынок открыт'; el.className='status-pill status-open';
+  } else {
+    el.textContent='Рынок закрыт'; el.className='status-pill status-closed';
+  }
+}
+setInterval(updateMarketStatus, 30000);
+updateMarketStatus();
+
+/* ─── Cache ─── */
+function cacheGet(key){
+  try{
+    const raw=localStorage.getItem(CACHE_PREFIX+key);
+    if(!raw) return null;
+    const obj=JSON.parse(raw);
+    if(Date.now()-obj.ts > CACHE_TTL){ localStorage.removeItem(CACHE_PREFIX+key); return null; }
+    return obj.data;
+  } catch(e){ return null; }
+}
+function cacheSet(key, data){
+  try{ localStorage.setItem(CACHE_PREFIX+key, JSON.stringify({ts:Date.now(), data})); } catch(e){}
+}
+function clearCache(){
+  const keys=[];
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k && k.startsWith(CACHE_PREFIX)) keys.push(k);
+  }
+  keys.forEach(k=>localStorage.removeItem(k));
+  updateCacheInfo();
+  alert('Кэш очищен: '+keys.length+' записей');
+}
+function updateCacheInfo(){
+  let cnt=0, bytes=0;
+  for(let i=0;i<localStorage.length;i++){
+    const k=localStorage.key(i);
+    if(k && k.startsWith(CACHE_PREFIX)){ cnt++; bytes+=localStorage.getItem(k).length*2; }
+  }
+  document.getElementById('cacheInfo').textContent = `Кэш: ${cnt} записей, ~${(bytes/1024/1024).toFixed(1)} МБ`;
+}
+updateCacheInfo();
+
+/* ─── Semaphore ─── */
+function makeSemaphore(max){
+  let running=0; const queue=[];
+  return function(fn){
+    return new Promise((res,rej)=>{
+      const run=()=>{ running++; fn().then(res,rej).finally(()=>{ running--; if(queue.length) queue.shift()(); }); };
+      if(running<max) run(); else queue.push(run);
+    });
+  };
+}
+const sem = makeSemaphore(MAX_PARALLEL);
+
+/* ─── MOEX ISS Fetching ─── */
+async function fetchJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`HTTP ${r.status} ${url}`);
+  return r.json();
+}
+
+async function loadTickers(){
+  const cached = cacheGet('tickers');
+  if(cached) return cached;
+  const url = `${ISS}/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=securities&securities.columns=SECID,SHORTNAME,LISTLEVEL`;
+  const j = await fetchJSON(url);
+  const rows = j.securities.data;
+  const tickers = rows
+    .filter(r => r[2]>=1 && r[2]<=3 && !BLACKLIST.includes(r[0]))
+    .map(r=>({secid:r[0], name:r[1], listlevel:r[2]}));
+  cacheSet('tickers', tickers);
+  return tickers;
+}
+
+async function loadCandles(ticker){
+  const key = 'candles_'+ticker;
+  const cached = cacheGet(key);
+  if(cached && cached.length >= MIN_BARS) return cached;
+  let all=[], start=0;
+  while(true){
+    const url = `${ISS}/engines/stock/markets/shares/boards/TQBR/securities/${ticker}/candles.json?interval=24&from=${HISTORY_FROM}&iss.meta=off&iss.only=candles&candles.columns=begin,open,close,high,low,volume&start=${start}`;
+    const j = await fetchJSON(url);
+    const rows = j.candles.data;
+    if(!rows || rows.length===0) break;
+    for(const r of rows){
+      all.push({d:r[0].slice(0,10), o:r[1], c:r[2], h:r[3], l:r[4], v:r[5]});
+    }
+    if(rows.length<500) break;
+    start+=500;
+  }
+  if(all.length>=MIN_BARS) cacheSet(key, all);
+  return all;
+}
+
+async function loadDividends(ticker){
+  const key = 'div_'+ticker;
+  const cached = cacheGet(key);
+  if(cached) return cached;
+  try{
+    const url = `${ISS}/securities/${ticker}/dividends.json?iss.meta=off`;
+    const j = await fetchJSON(url);
+    const rows = j.dividends.data;
+    const dates = rows.map(r=>r[3]).filter(Boolean); // registryclosedate
+    cacheSet(key, dates);
+    return dates;
+  } catch(e){ cacheSet(key, []); return []; }
+}
+
+async function loadSnapshot(){
+  const url = `${ISS}/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=marketdata&marketdata.columns=SECID,OPEN,HIGH,LOW,LAST,VOLTODAY`;
+  const j = await fetchJSON(url);
+  const rows = j.marketdata.data;
+  const map = {};
+  for(const r of rows){
+    if(r[1] && r[4] && r[5]) map[r[0]] = {o:r[1], h:r[2], l:r[3], c:r[4], v:r[5]};
+  }
+  return map;
+}
+
+/* ─── Indicators (identical to backtest) ─── */
+function avgVol(data, i, win){
+  if(i < win) return null;
+  let sum=0, cnt=0;
+  for(let k=i-win; k<i; k++){
+    if(data[k].v > 0){ sum+=data[k].v; cnt++; }
+  }
+  if(cnt < win*0.7) return null;
+  return sum/cnt;
+}
+
+function maVal(data, i, period){
+  if(i < period-1) return null;
+  let sum=0;
+  for(let k=i-period+1; k<=i; k++) sum+=data[k].c;
+  return sum/period;
+}
+
+function closePos(bar){
+  const range = bar.h - bar.l;
+  if(range===0) return 0.5;
+  return (bar.c - bar.l)/range;
+}
+
+function atrPct(data, i, win){
+  if(i < win+1) return null;
+  let sum=0;
+  for(let k=i-win; k<i; k++){
+    const tr = Math.max(data[k].h-data[k].l, Math.abs(data[k].h-data[k-1].c), Math.abs(data[k].l-data[k-1].c));
+    sum += (tr/data[k].c)*100;
+  }
+  return sum/win;
+}
+
+function avgValueRub(data, i, win){
+  if(i < win) return null;
+  let sum=0, cnt=0;
+  for(let k=i-win; k<i; k++){
+    const val = data[k].v * data[k].c;
+    if(val>0){ sum+=val; cnt++; }
+  }
+  return cnt>0 ? sum/cnt : null;
+}
+
+function dayRet(data, i){
+  if(i<1) return 0;
+  return Math.abs((data[i].c - data[i-1].c)/data[i-1].c)*100;
+}
+
+function isDivGapDate(bar, divDates){
+  return divDates.includes(bar.d);
+}
+
+function isDivGapHeuristic(data, i){
+  if(i<1) return false;
+  const ret = (data[i].c - data[i-1].c)/data[i-1].c * 100;
+  if(ret > -P.divGap) return false;
+  const av = avgVol(data, i, P.volWin);
+  const vr = av ? data[i].v/av : 99;
+  if(vr >= 2) return false;
+  if(data[i].o >= data[i-1].c) return false;
+  return true;
+}
+
+function isDivGap(data, i, divDates){
+  if(isDivGapDate(data[i], divDates)) return true;
+  return isDivGapHeuristic(data, i);
+}
+
+function getTier(vr){
+  for(const t of P.tiers){
+    if(vr >= t.minVr) return t;
+  }
+  return null;
+}
+
+/* ─── Signal Scanner ─── */
+function scanTicker(data, divDates){
+  const signals = [];
+  const len = data.length;
+  const startIdx = Math.max(len - SCAN_WINDOW, P.volWin + P.maPeriod);
+
+  for(let i = startIdx; i < len; i++){
+    const bar = data[i];
+
+    // 1. Div gap
+    if(isDivGap(data, i, divDates)) continue;
+
+    // 2. avgVol
+    const av = avgVol(data, i, P.volWin);
+    if(!av) continue;
+
+    // 3. VR
+    const vr = bar.v / av;
+    if(vr < P.volMin) continue;
+
+    // 4. Max VR
+    if(vr > P.maxVr) continue;
+
+    // 5. Consecutive days with VR >= volMin >= sigDays
+    let consec = 0;
+    for(let k=i; k >= Math.max(0, i-10); k--){
+      const a2 = avgVol(data, k, P.volWin);
+      if(a2 && data[k].v/a2 >= P.volMin) consec++; else break;
+    }
+    if(consec < P.sigDays) continue;
+
+    // 6. ATR%
+    const atr = atrPct(data, i, P.atrWin);
+    if(!atr || atr < P.atrMin) continue;
+
+    // 7. MA50
+    const ma = maVal(data, i, P.maPeriod);
+    if(!ma) continue;
+
+    // 8. close > MA50
+    if(bar.c <= ma) continue;
+
+    // 9. Bull bar
+    if(P.bullBar && bar.c <= bar.o) continue;
+
+    // 10. Close position
+    const cp = closePos(bar);
+    if(cp < P.cpMin) continue;
+
+    // 11. Day return
+    const dr = dayRet(data, i);
+    if(dr > P.maxDayRet) continue;
+
+    // Liquidity & strategy
+    const avgVal = avgValueRub(data, i, 200);
+    const strategy = avgVal && avgVal >= P.liq ? 'S1' : 'S2';
+
+    // Tier
+    const tier = getTier(vr);
+    if(!tier) continue;
+
+    // T+1 check
+    let t1Status = 'pending';
+    let t1Vr = null;
+    let gapCancelled = false;
+    const gapThreshold = bar.c * (1 + P.gapCancel/100);
+
+    if(i+1 < len){
+      const nextBar = data[i+1];
+      // Gap cancel
+      if(nextBar.o > gapThreshold){
+        gapCancelled = true;
+        continue;
+      }
+      // VR confirmation
+      const av2 = avgVol(data, i+1, P.volWin);
+      if(av2){
+        t1Vr = nextBar.v / av2;
+        if(t1Vr >= P.vrConfirm){
+          t1Status = 'confirmed';
+        } else {
+          continue; // T+1 exists but VR not confirmed
+        }
+      }
+    }
+
+    // Entry price & stops
+    let entryPrice = null;
+    let catStop = null;
+    if(i+1 < len){
+      entryPrice = data[i+1].c * (1 + P.slippage);
+      catStop = entryPrice * (1 - P.stopPct/100);
+    }
+
+    signals.push({
+      barIdx: i,
+      date: bar.d,
+      vr: vr,
+      atr: atr,
+      cp: cp,
+      dayRet: dr,
+      ma50: ma,
+      tier: tier,
+      strategy: strategy,
+      avgTurnover: avgVal,
+      entryPrice: entryPrice,
+      catStop: catStop,
+      gapThreshold: gapThreshold,
+      t1Status: t1Status,
+      t1Vr: t1Vr,
+      close: bar.c,
+      isLastBar: i === len-1,
+    });
+  }
+  return signals;
+}
+
+/* ─── Full-year Signal Scanner (for portfolio simulation) ─── */
+function scanTickerFull(data, divDates){
+  const signals=[];
+  const len=data.length;
+  // Start 1 year back (approx 250 trading days) but ensure enough history for indicators
+  const oneYearBars=250;
+  const startIdx=Math.max(P.volWin+P.maPeriod, len-oneYearBars);
+  let consec=0;
+
+  for(let i=startIdx; i<len-1; i++){
+    const bar=data[i];
+    if(isDivGap(data,i,divDates)){consec=0;continue}
+    const av=avgVol(data,i,P.volWin);
+    if(!av){consec=0;continue}
+    const vr=bar.v/av;
+    if(vr>=P.volMin) consec++; else {consec=0;continue}
+    if(consec<P.sigDays) continue;
+    if(vr>P.maxVr) continue;
+    const atr=atrPct(data,i,P.atrWin);
+    if(!atr||atr<P.atrMin) continue;
+    const ma=maVal(data,i,P.maPeriod);
+    if(!ma) continue;
+    if(bar.c<=ma) continue;
+    if(P.bullBar&&bar.c<=bar.o) continue;
+    const cp=closePos(bar);
+    if(cp<P.cpMin) continue;
+    const dr=dayRet(data,i);
+    if(dr>P.maxDayRet) continue;
+    const tier=getTier(vr);
+    if(!tier) continue;
+    const avgVal=avgValueRub(data,i,200);
+    const isLiquid=avgVal&&avgVal>=P.liq;
+
+    // T+1 checks
+    const ei=i+1;
+    if(ei>=len) continue;
+    const nextBar=data[ei];
+    const gapThreshold=bar.c*(1+P.gapCancel/100);
+    if(nextBar.o>gapThreshold) continue;
+    const avE=avgVol(data,ei,P.volWin);
+    if(!avE) continue;
+    const vrE=nextBar.v/avE;
+    if(vrE<P.vrConfirm) continue;
+
+    const ep=nextBar.c*(1+P.commission+P.slippage);
+    const catStopPx=ep*(1-P.stopPct/100);
+
+    signals.push({
+      ticker:null, // filled later
+      signalDate:bar.d, entryDate:nextBar.d,
+      vr, vrEntry:vrE, tier, atr20:atr,
+      ep, catStopPx, liqAvg:avgVal, isLiquid,
+      cp, dayRetPct:dr,
+    });
+
+    // Skip forward past this trade's exit
+    let peak=ep;
+    for(let j=ei+1;j<len;j++){
+      const held=j-ei;
+      if(!isDivGap(data,j,divDates)){
+        if(data[j].l<=catStopPx){i=j;break}
+        if(held>=tier.tsAfter){
+          const tsPx=peak*(1-tier.tsDist/100);
+          if(data[j].l<=tsPx){i=j;break}
+        }
+      }
+      if(data[j].h>peak) peak=data[j].h;
+      if(held>=tier.maxHold){i=j;break}
+    }
+    consec=0;
+  }
+  return signals;
+}
+
+/* ─── Portfolio Simulation Engine (identical to backtest) ─── */
+function simulatePortfolio(signals, allTickerData, allDivDates, maxPos){
+  const costOut=P.commission+P.slippage;
+
+  // Build priceMap: {ticker: {date: bar}}
+  const priceMap={};
+  for(const [ticker,data] of Object.entries(allTickerData)){
+    priceMap[ticker]={};
+    for(const bar of data) priceMap[ticker][bar.d]=bar;
+  }
+
+  // Collect all dates in the simulation window (1 year)
+  const dateSet=new Set();
+  for(const data of Object.values(allTickerData)){
+    const oneYearBars=250;
+    const startIdx=Math.max(0,data.length-oneYearBars);
+    for(let i=startIdx;i<data.length;i++) dateSet.add(data[i].d);
+  }
+  const dates=[...dateSet].sort();
+
+  // Index signals by entry date
+  const sigByDate={};
+  for(const s of signals){
+    if(!sigByDate[s.entryDate]) sigByDate[s.entryDate]=[];
+    sigByDate[s.entryDate].push(s);
+  }
+  for(const d of Object.keys(sigByDate)){
+    sigByDate[d].sort((a,b)=>b.vr-a.vr||a.ticker.localeCompare(b.ticker));
+  }
+
+  let cash=1.0;
+  const positions=[];
+  const trades=[];
+  const equity=[];
+
+  function isDivGapBar(bar,ticker,date){
+    if(allDivDates[ticker]&&allDivDates[ticker].includes(date)) return true;
+    // Heuristic fallback
+    const pm=priceMap[ticker];
+    if(!pm) return false;
+    const allDates=Object.keys(pm).filter(d=>d<date).sort();
+    if(!allDates.length) return false;
+    const prev=pm[allDates[allDates.length-1]];
+    if(!prev||prev.c<=0) return false;
+    const dr=(bar.c/prev.c-1)*100;
+    if(dr>-P.divGap) return false;
+    if(bar.o>=prev.c*(1-P.divGap/100)) return false;
+    return true;
+  }
+
+  for(const d of dates){
+    // --- Exits ---
+    const toClose=[];
+    for(let p=positions.length-1;p>=0;p--){
+      const pos=positions[p];
+      const bar=priceMap[pos.ticker]?.[d];
+      if(!bar){continue}
+      pos.lastPx=bar.c;
+      pos.held++;
+
+      let exitPrice=null,reason=null;
+      const divGap=isDivGapBar(bar,pos.ticker,d);
+
+      if(!divGap){
+        if(bar.l<=pos.catStopPx){exitPrice=pos.catStopPx;reason='cat_stop'}
+        if(!exitPrice&&pos.held>=pos.tier.tsAfter){
+          const tsPx=pos.peak*(1-pos.tier.tsDist/100);
+          if(bar.l<=tsPx){exitPrice=tsPx;reason='trailing_stop'}
+        }
+      }
+      if(bar.h>pos.peak) pos.peak=bar.h;
+      if(!exitPrice&&pos.held>=pos.tier.maxHold){exitPrice=bar.c;reason='max_hold'}
+
+      if(exitPrice!==null){
+        const fe=exitPrice*(1-costOut);
+        const ret=(fe/pos.ep-1)*100;
+        cash+=pos.qty*fe;
+        trades.push({
+          ticker:pos.ticker,tier:pos.tier.name,vr:pos.vr,
+          signalDate:pos.signalDate,entryDate:pos.entryDate,
+          exitDate:d,ep:pos.ep,exitPrice:fe,ret,reason,held:pos.held,
+        });
+        toClose.push(p);
+      }
+    }
+    for(const idx of toClose.sort((a,b)=>b-a)) positions.splice(idx,1);
+
+    // --- Entries ---
+    const daySigs=sigByDate[d];
+    if(daySigs&&daySigs.length){
+      const candidates=[...daySigs];
+
+      // ATR rotation
+      while(positions.length>=maxPos&&candidates.length>0){
+        candidates.sort((a,b)=>b.atr20-a.atr20||b.vr-a.vr);
+        const cand=candidates[0];
+        let weakIdx=-1,weakATR=Infinity;
+        for(let p=0;p<positions.length;p++){
+          const pa=positions[p].atr20;
+          if(pa<weakATR){weakATR=pa;weakIdx=p}
+        }
+        if(weakIdx>=0&&cand.atr20>=weakATR*P.rotMult&&cand.atr20-weakATR>=P.rotAbs){
+          const weak=positions[weakIdx];
+          const bar=priceMap[weak.ticker]?.[d];
+          const px=bar?bar.c:weak.lastPx||weak.ep;
+          const fe=px*(1-costOut);
+          const ret=(fe/weak.ep-1)*100;
+          cash+=weak.qty*fe;
+          trades.push({
+            ticker:weak.ticker,tier:weak.tier.name,vr:weak.vr,
+            signalDate:weak.signalDate,entryDate:weak.entryDate,
+            exitDate:d,ep:weak.ep,exitPrice:fe,ret,reason:'rotate_atr',held:weak.held,
+          });
+          positions.splice(weakIdx,1);
+        }else break;
+      }
+
+      // Enter new positions
+      if(positions.length<maxPos&&candidates.length>0){
+        const slotsAvail=maxPos-positions.length;
+        const toEnter=candidates.slice(0,slotsAvail);
+        const budget=cash;
+        if(budget>0&&toEnter.length>0){
+          const weights=toEnter.map(s=>Math.min(s.vr/3,3));
+          const wSum=weights.reduce((a,b)=>a+b,0);
+          for(let k=0;k<toEnter.length;k++){
+            const s=toEnter[k];
+            const stake=budget*(weights[k]/wSum);
+            const qty=stake/s.ep;
+            if(qty<=0) continue;
+            cash-=qty*s.ep;
+            positions.push({
+              ticker:s.ticker,ep:s.ep,catStopPx:s.catStopPx,
+              tier:s.tier,vr:s.vr,atr20:s.atr20,
+              peak:s.ep,held:0,qty,
+              signalDate:s.signalDate,entryDate:s.entryDate,
+              lastPx:s.ep,
+            });
+          }
+        }
+      }
+    }
+
+    // --- Equity ---
+    let openVal=0;
+    for(const pos of positions){
+      const bar=priceMap[pos.ticker]?.[d];
+      const px=bar?bar.c:pos.lastPx||pos.ep;
+      pos.lastPx=px;
+      openVal+=pos.qty*px;
+    }
+    equity.push({d,eq:(cash+openVal)*100});
+  }
+
+  // Close remaining positions
+  const lastDate=dates[dates.length-1];
+  for(const pos of positions){
+    const px=pos.lastPx||pos.ep;
+    const fe=px*(1-costOut);
+    const ret=(fe/pos.ep-1)*100;
+    trades.push({
+      ticker:pos.ticker,tier:pos.tier.name,vr:pos.vr,
+      signalDate:pos.signalDate,entryDate:pos.entryDate,
+      exitDate:lastDate,ep:pos.ep,exitPrice:fe,ret,reason:'open',held:pos.held,
+    });
+  }
+  return {trades,equity};
+}
+
+/* ─── Progress ─── */
+let progressTotal=0, progressDone=0;
+function showProgress(show){
+  document.getElementById('progressWrap').classList.toggle('visible', show);
+}
+function updateProgress(text){
+  progressDone++;
+  const pct = Math.min(100, Math.round(progressDone/progressTotal*100));
+  document.getElementById('progressBar').style.width = pct+'%';
+  document.getElementById('progressText').textContent = text + ` (${progressDone}/${progressTotal})`;
+}
+function resetProgress(total){
+  progressTotal=total; progressDone=0;
+  document.getElementById('progressBar').style.width='0%';
+}
+
+/* ─── Main Scan ─── */
+async function runScan(){
+  if(scanning) return;
+  scanning=true;
+  const btn=document.getElementById('btnScan');
+  btn.disabled=true; btn.textContent='Сканирование...';
+  allSignals=[];
+  document.getElementById('grid').innerHTML='';
+  document.getElementById('summary').textContent='';
+  document.getElementById('emptyState').style.display='none';
+
+  try{
+    showProgress(true);
+    resetProgress(3);
+    updateProgress('Загрузка списка тикеров');
+
+    const tickers = await loadTickers();
+    updateProgress('Список тикеров загружен: '+tickers.length);
+
+    // Load snapshot if market open
+    let snapshot = null;
+    if(isMarketOpen()){
+      try{ snapshot = await loadSnapshot(); } catch(e){ console.warn('Snapshot failed',e); }
+    }
+    updateProgress('Снимок рынка '+(snapshot?'загружен':'пропущен'));
+
+    // Load candles + dividends for all tickers
+    resetProgress(tickers.length);
+    const todayStr = dateFmt(todayMSK());
+
+    // Store ticker data for portfolio simulation
+    const allTickerData = {};
+    const allDivDates = {};
+    let allPortSigs = [];
+
+    const scanResults = await Promise.all(tickers.map(t => sem(async ()=>{
+      try{
+        let candles = await loadCandles(t.secid);
+        const divDates = await loadDividends(t.secid);
+
+        if(!candles || candles.length < MIN_BARS){
+          updateProgress(t.secid+' — недостаточно данных');
+          return [];
+        }
+
+        // Append synthetic intraday bar
+        if(snapshot && snapshot[t.secid]){
+          const snap = snapshot[t.secid];
+          const lastDate = candles[candles.length-1].d;
+          if(lastDate !== todayStr){
+            candles = [...candles, {d:todayStr, o:snap.o, c:snap.c, h:snap.h, l:snap.l, v:snap.v}];
+          }
+        }
+
+        // Store for portfolio simulation
+        allTickerData[t.secid] = candles;
+        if(divDates.length>0) allDivDates[t.secid] = divDates;
+
+        // Screener signals (last 10 bars)
+        const sigs = scanTicker(candles, divDates);
+        sigs.forEach(s=>{ s.secid=t.secid; s.tickerName=t.name; });
+
+        // Full-year signals for portfolio
+        const portSigs = scanTickerFull(candles, divDates);
+        portSigs.forEach(s=>{ s.ticker=t.secid; });
+        allPortSigs.push(...portSigs);
+
+        updateProgress(t.secid + (sigs.length ? ` — ${sigs.length} сигнал(ов)` : ''));
+        return sigs;
+      } catch(e){
+        console.warn('Error loading', t.secid, e);
+        updateProgress(t.secid+' — ошибка');
+        return [];
+      }
+    })));
+
+    allSignals = scanResults.flat();
+    renderSignals();
+
+    // Portfolio simulation
+    const s1Sigs = allPortSigs.filter(s=>s.isLiquid);
+    const s2Sigs = allPortSigs.filter(s=>!s.isLiquid);
+    const s1 = simulatePortfolio(s1Sigs, allTickerData, allDivDates, P.maxPos1);
+    const s2 = simulatePortfolio(s2Sigs, allTickerData, allDivDates, P.maxPos2);
+
+    // Combined equity
+    const eqMap={};
+    for(const e of s1.equity) eqMap[e.d]=(eqMap[e.d]||0)+e.eq;
+    for(const e of s2.equity) eqMap[e.d]=(eqMap[e.d]||0)+e.eq;
+    const combinedEq=Object.entries(eqMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,eq])=>({d,eq:eq/2}));
+    const combinedTrades=[...s1.trades,...s2.trades];
+
+    portResults = {
+      combined:{trades:combinedTrades, equity:combinedEq},
+      s1:s1,
+      s2:s2,
+    };
+    document.getElementById('portfolioSection').style.display='block';
+    renderPortfolio();
+    updateCacheInfo();
+
+  } catch(e){
+    alert('Ошибка сканирования: '+e.message);
+    console.error(e);
+  } finally {
+    showProgress(false);
+    scanning=false;
+    btn.disabled=false; btn.textContent='Сканировать';
+  }
+}
+
+/* ─── Freshness ─── */
+function freshness(dateStr){
+  const todayStr = dateFmt(todayMSK());
+  if(dateStr === todayStr) return {text:'Сегодня', cls:'fresh-today'};
+  const diffMs = todayMSK().getTime() - new Date(dateStr+'T00:00:00').getTime();
+  const days = Math.round(diffMs / 86400000);
+  if(days<=1) return {text:'Вчера', cls:'fresh-yesterday'};
+  return {text:days+' дн. назад', cls:'fresh-old'};
+}
+
+/* ─── Filters & Sort ─── */
+function setFilter(el){
+  const grp = el.dataset.filter;
+  const val = el.dataset.val;
+  filters[grp] = val;
+  document.querySelectorAll(`.chip[data-filter="${grp}"]`).forEach(c=>c.classList.remove('active'));
+  el.classList.add('active');
+  renderSignals();
+}
+
+function applyFilters(sigs){
+  let out = sigs;
+  if(filters.tier!=='ALL') out = out.filter(s=>s.tier.name===filters.tier);
+  if(filters.t1==='CONFIRMED') out = out.filter(s=>s.t1Status==='confirmed');
+  if(filters.t1==='PENDING') out = out.filter(s=>s.t1Status==='pending');
+  if(filters.sort==='vr') out.sort((a,b)=>b.vr-a.vr);
+  else if(filters.sort==='date') out.sort((a,b)=>b.date.localeCompare(a.date));
+  else if(filters.sort==='atr') out.sort((a,b)=>b.atr-a.atr);
+  return out;
+}
+
+/* ─── Render ─── */
+function fmtNum(n, dec=2){ return n!=null ? n.toFixed(dec) : '—'; }
+function fmtMln(n){ return n!=null ? (n/1e6).toFixed(1)+' млн ₽' : '—'; }
+function fmtPrice(n){ return n!=null ? n.toFixed(2)+' ₽' : '—'; }
+
+function renderSignals(){
+  const grid = document.getElementById('grid');
+  const summary = document.getElementById('summary');
+  const empty = document.getElementById('emptyState');
+
+  // Deduplicate: keep only latest signal per ticker
+  const byTicker = {};
+  for(const s of allSignals){
+    if(!byTicker[s.secid] || s.date > byTicker[s.secid].date) byTicker[s.secid] = s;
+  }
+  const unique = Object.values(byTicker);
+  const filtered = applyFilters(unique);
+
+  const totalU = allSignals.filter(s=>s.tier.name==='ULTRA').length;
+  const totalS = allSignals.filter(s=>s.tier.name==='STRONG').length;
+  const totalB = allSignals.filter(s=>s.tier.name==='BASE').length;
+
+  if(allSignals.length === 0 && !scanning){
+    summary.textContent='';
+    grid.innerHTML='';
+    empty.style.display='block';
+    return;
+  }
+  empty.style.display='none';
+  summary.innerHTML=`Найдено сигналов: <span>${unique.length}</span> (показано: <span>${filtered.length}</span>) &nbsp;|&nbsp; ULTRA: <span>${totalU}</span> &nbsp; STRONG: <span>${totalS}</span> &nbsp; BASE: <span>${totalB}</span>`;
+
+  grid.innerHTML = filtered.map(s=>{
+    const fr = freshness(s.date);
+    const t1Html = s.t1Status==='confirmed'
+      ? `<span class="t1-status t1-confirmed">Подтверждён VR=${fmtNum(s.t1Vr,1)}</span>`
+      : `<span class="t1-status t1-pending">Ожидание T+1</span>`;
+    return `<div class="card">
+      <div class="card-head">
+        <span class="card-ticker">${s.secid}</span>
+        <span class="card-name">${s.tickerName}</span>
+        <span class="strat-badge">${s.strategy}</span>
+        <span class="tier-badge tier-${s.tier.name}">${s.tier.name}</span>
+      </div>
+      <div class="card-body">
+        <span class="lbl">VR</span><span class="val val-vr">${fmtNum(s.vr,1)}x</span>
+        <span class="lbl">ATR%</span><span class="val">${fmtNum(s.atr)}%</span>
+        <span class="lbl">Close Pos</span><span class="val">${fmtNum(s.cp)}</span>
+        <span class="lbl">Day Ret</span><span class="val">${fmtNum(s.dayRet)}%</span>
+        <span class="lbl">Entry Price (EP)</span><span class="val">${fmtPrice(s.entryPrice)}</span>
+        <span class="lbl">Cat Stop</span><span class="val val-red">${fmtPrice(s.catStop)}</span>
+        <span class="lbl">TS после дня</span><span class="val">${s.tier.tsAfter}</span>
+        <span class="lbl">TS дист%</span><span class="val">${fmtNum(s.tier.tsDist,1)}%</span>
+        <span class="lbl">Gap Cancel ></span><span class="val">${fmtPrice(s.gapThreshold)}</span>
+        <span class="lbl">Оборот (ср.)</span><span class="val">${fmtMln(s.avgTurnover)}</span>
+        <span class="lbl">MA50</span><span class="val">${fmtPrice(s.ma50)}</span>
+        <span class="lbl">Max Hold</span><span class="val">${s.tier.maxHold} дн.</span>
+        <span class="lbl">Дата сигнала</span><span class="val">${s.date}</span>
+        <span class="lbl">Закрытие</span><span class="val">${fmtPrice(s.close)}</span>
+      </div>
+      <div class="card-foot">
+        <span class="freshness ${fr.cls}">${fr.text}</span>
+        ${t1Html}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+/* ─── Portfolio UI ─── */
+let portResults = {combined:null, s1:null, s2:null};
+let activePortTab = 'combined';
+
+function switchPortTab(tab){
+  activePortTab=tab;
+  document.querySelectorAll('.port-tab').forEach((el,i)=>{
+    el.classList.toggle('active', ['combined','s1','s2'][i]===tab);
+  });
+  renderPortfolio();
+}
+
+function renderPortfolio(){
+  const r=portResults[activePortTab];
+  if(!r) return;
+  const {trades,equity}=r;
+
+  // Stats
+  const closed=trades.filter(t=>t.reason!=='open');
+  const open=trades.filter(t=>t.reason==='open');
+  const wins=closed.filter(t=>t.ret>0);
+  const wr=closed.length?((wins.length/closed.length)*100).toFixed(1):'—';
+  const avgRet=closed.length?(closed.reduce((s,t)=>s+t.ret,0)/closed.length).toFixed(2):'—';
+  const totalRet=equity.length?((equity[equity.length-1].eq-100)).toFixed(1):'—';
+  const maxDD=calcMaxDD(equity);
+  const grossWin=wins.reduce((s,t)=>s+t.ret,0);
+  const grossLoss=Math.abs(closed.filter(t=>t.ret<=0).reduce((s,t)=>s+t.ret,0));
+  const pf=grossLoss>0?(grossWin/grossLoss).toFixed(2):'∞';
+
+  document.getElementById('portStats').innerHTML=`
+    <div class="port-stat"><div class="stat-label">Доходность</div><div class="stat-val" style="color:${parseFloat(totalRet)>=0?'var(--green)':'var(--red)'}">${totalRet}%</div></div>
+    <div class="port-stat"><div class="stat-label">Сделок</div><div class="stat-val">${closed.length}</div></div>
+    <div class="port-stat"><div class="stat-label">Открыто</div><div class="stat-val">${open.length}</div></div>
+    <div class="port-stat"><div class="stat-label">Win Rate</div><div class="stat-val">${wr}%</div></div>
+    <div class="port-stat"><div class="stat-label">Avg Ret</div><div class="stat-val">${avgRet}%</div></div>
+    <div class="port-stat"><div class="stat-label">PF</div><div class="stat-val">${pf}</div></div>
+    <div class="port-stat"><div class="stat-label">Max DD</div><div class="stat-val" style="color:var(--red)">${maxDD}%</div></div>
+  `;
+
+  // Open positions
+  if(open.length>0){
+    document.getElementById('portPositions').innerHTML=`<h3>Открытые позиции</h3>
+      <table class="port-trades"><thead><tr><th>Тикер</th><th>Тир</th><th>Вход</th><th>Дата входа</th><th>P/L</th><th>Дней</th></tr></thead>
+      <tbody>${open.map(t=>`<tr>
+        <td><b>${t.ticker}</b></td><td>${t.tier}</td>
+        <td>${t.ep.toFixed(2)}</td><td>${t.entryDate}</td>
+        <td class="${t.ret>=0?'ret-pos':'ret-neg'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td>
+        <td>${t.held}</td>
+      </tr>`).join('')}</tbody></table>`;
+  } else {
+    document.getElementById('portPositions').innerHTML='';
+  }
+
+  // Equity chart
+  drawEquity(equity);
+
+  // Trades table
+  document.getElementById('portTradesHead').innerHTML=`<tr><th>Тикер</th><th>Тир</th><th>VR</th><th>Вход</th><th>Выход</th><th>Дата входа</th><th>Дата выхода</th><th>Ret%</th><th>Причина</th><th>Дней</th></tr>`;
+  const sorted=[...trades].sort((a,b)=>b.entryDate.localeCompare(a.entryDate));
+  document.getElementById('portTradesBody').innerHTML=sorted.map(t=>`<tr>
+    <td><b>${t.ticker}</b></td><td>${t.tier}</td><td>${t.vr.toFixed(1)}</td>
+    <td>${t.ep.toFixed(2)}</td><td>${t.exitPrice.toFixed(2)}</td>
+    <td>${t.entryDate}</td><td>${t.exitDate}</td>
+    <td class="${t.ret>=0?'ret-pos':'ret-neg'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td>
+    <td>${t.reason}</td><td>${t.held}</td>
+  </tr>`).join('');
+}
+
+function calcMaxDD(equity){
+  let peak=0,maxDD=0;
+  for(const e of equity){
+    if(e.eq>peak) peak=e.eq;
+    const dd=(peak-e.eq)/peak*100;
+    if(dd>maxDD) maxDD=dd;
+  }
+  return maxDD.toFixed(1);
+}
+
+function drawEquity(equity){
+  const canvas=document.getElementById('equityCanvas');
+  const ctx=canvas.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const rect=canvas.parentElement.getBoundingClientRect();
+  canvas.width=rect.width*dpr;
+  canvas.height=200*dpr;
+  canvas.style.width=rect.width+'px';
+  canvas.style.height='200px';
+  ctx.scale(dpr,dpr);
+  const W=rect.width, H=200;
+
+  ctx.fillStyle='#16213e';
+  ctx.fillRect(0,0,W,H);
+
+  if(equity.length<2) return;
+
+  const vals=equity.map(e=>e.eq);
+  const minV=Math.min(...vals)*0.995;
+  const maxV=Math.max(...vals)*1.005;
+  const range=maxV-minV||1;
+
+  // Grid lines
+  ctx.strokeStyle='#2a2a4a';
+  ctx.lineWidth=0.5;
+  for(let i=0;i<5;i++){
+    const y=H*0.05+i*(H*0.9/4);
+    ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(W-10,y);ctx.stroke();
+    const val=maxV-(i/4)*range;
+    ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillText(val.toFixed(0)+'%',36,y+3);
+  }
+
+  // Equity line
+  ctx.strokeStyle='#e94560';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  for(let i=0;i<equity.length;i++){
+    const x=40+(W-50)*i/(equity.length-1);
+    const y=H*0.05+(1-(vals[i]-minV)/range)*(H*0.9);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+
+  // 100% baseline
+  if(100>=minV&&100<=maxV){
+    const y100=H*0.05+(1-(100-minV)/range)*(H*0.9);
+    ctx.strokeStyle='#ffffff44';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.beginPath();ctx.moveTo(40,y100);ctx.lineTo(W-10,y100);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Date labels
+  ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='center';
+  const step=Math.max(1,Math.floor(equity.length/6));
+  for(let i=0;i<equity.length;i+=step){
+    const x=40+(W-50)*i/(equity.length-1);
+    ctx.fillText(equity[i].d.slice(5),x,H-2);
+  }
+}
+
+/* ─── Auto-refresh ─── */
+function toggleAutoRefresh(){
+  if(document.getElementById('chkAuto').checked){
+    if(autoTimer) clearInterval(autoTimer);
+    autoTimer = setInterval(()=>{
+      if(isMarketOpen() && !scanning) runScan();
+    }, 5*60*1000);
+  } else {
+    if(autoTimer){ clearInterval(autoTimer); autoTimer=null; }
+  }
+}
+</script>
+</body>
+</html>
