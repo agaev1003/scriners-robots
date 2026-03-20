@@ -1,0 +1,14 @@
+{
+  "name": "moex-robot",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node robot.mjs",
+    "cycle": "node robot.mjs",
+    "panel": "PORT=8080 node -e \"import('./panel.js').then(m=>m.startPanel(8080,true,console.log))\"",
+    "test": "node test-tinkoff.js && node test-signals.js",
+    "test-api": "node test-tinkoff.js",
+    "test-signals": "node test-signals.js"
+  }
+}
