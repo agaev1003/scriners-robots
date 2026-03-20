@@ -48,11 +48,21 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
     if (pos.status !== 'open') continue;
     const uid = uidOf(pos.ticker);
     if (!uid || !brokerSecs[uid] || brokerSecs[uid].balance <= 0) {
-      log(`RECONCILE: ${pos.ticker} gone from broker → closed`);
+      // Try to get last known price for accurate return calculation
+      let exitPrice = pos.entryPrice;
+      try {
+        if (uid) {
+          const prices = await tkf.getLastPrices(token, [uid]);
+          if (prices[uid]) exitPrice = prices[uid];
+        }
+      } catch {}
+      const ret = pos.entryPrice > 0 ? (exitPrice / pos.entryPrice - 1) * 100 : 0;
+      log(`RECONCILE: ${pos.ticker} gone from broker → closed (ret=${ret.toFixed(2)}%)`);
       pos.status = 'closed';
       pos.exitDate = today;
+      pos.exitPrice = exitPrice;
       pos.exitReason = 'broker_gone';
-      pos.ret = 0; // unknown exit price
+      pos.ret = ret;
       state.history.push({ ...pos });
     }
   }
@@ -81,7 +91,7 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
       signalDate: today, entryDate: today,
       entryPrice: price,
       catStopPx: price * (1 - P.stopPct / 100),
-      lots: info.balance,
+      lots: info.balance, lotSize: instrMap[ticker]?.lot || 1,
       peak: price, held: 0,
       stopOrderId: null, currentStopPx: 0,
       status: 'open',
@@ -95,7 +105,7 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
       const avgPx = tkf.quotToNum(pp.averagePositionPrice);
       if (!avgPx) continue;
       const pos = state.positions.find(p => uidOf(p.ticker) === pp.instrumentUid);
-      if (pos && Math.abs(avgPx - pos.entryPrice) / pos.entryPrice > 0.001) {
+      if (pos && pos.entryPrice > 0 && Math.abs(avgPx - pos.entryPrice) / pos.entryPrice > 0.001) {
         log(`RECONCILE: ${pos.ticker} EP ${pos.entryPrice.toFixed(2)} → ${avgPx.toFixed(2)}`);
         pos.entryPrice = avgPx;
         pos.catStopPx = avgPx * (1 - P.stopPct / 100);

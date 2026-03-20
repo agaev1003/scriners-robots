@@ -24,8 +24,6 @@ export function emptyState() {
     cashRub: MAX_CAPITAL_RUB,
     livePrimedAt: null,     // ISO string — first-run priming timestamp
     lastRunAt: null,        // ISO string — last cycle timestamp
-    entryPlan: null,        // cached entry plan
-    entryPlanTs: null,      // entry plan timestamp (ms)
   };
 }
 
@@ -102,22 +100,3 @@ export function recordCurvePoint(st, totalRub, cashRub, openCount) {
   });
 }
 
-/* ─── Entry plan caching (TTL 36h) ─── */
-const ENTRY_PLAN_TTL_MS = 36 * 3600_000;
-
-export function getCachedPlan(st, currentSignalDate) {
-  if (!st.entryPlan || !st.entryPlanTs) return null;
-  if (Date.now() - st.entryPlanTs > ENTRY_PLAN_TTL_MS) return null;
-  if (st.entryPlan.signalDate !== currentSignalDate) return null;
-  return st.entryPlan;
-}
-
-export function setCachedPlan(st, plan) {
-  st.entryPlan = plan;
-  st.entryPlanTs = Date.now();
-}
-
-export function clearCachedPlan(st) {
-  st.entryPlan = null;
-  st.entryPlanTs = null;
-}

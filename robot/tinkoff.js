@@ -53,12 +53,16 @@ async function fetchTkf(endpoint, body, token) {
         const err = new Error(`TKF ${res.status}: ${msg}`);
         err.status = res.status;
         err.body = json;
+        // Don't retry client errors (4xx) — they won't resolve on retry
+        if (res.status >= 400 && res.status < 500) throw err;
         throw err;
       }
       return json;
     } catch (e) {
       clearTimeout(timer);
       lastErr = e;
+      // Don't retry client errors
+      if (e.status >= 400 && e.status < 500) throw e;
     }
   }
   throw lastErr;

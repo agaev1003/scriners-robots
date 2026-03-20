@@ -53,7 +53,7 @@ export function startPanel(port, dryRun, log) {
 
         if (path === '/api/status') {
           const open = st.positions.filter(p => p.status === 'open');
-          const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots, 0);
+          const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots * (p.lotSize || 1), 0);
           return json(res, {
             mode: dryRun ? 'dry_run' : 'live',
             lastRunAt: st.lastRunAt,

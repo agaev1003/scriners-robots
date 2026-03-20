@@ -158,11 +158,28 @@ async function managePositions(state, candleMap, divMap, instrMap) {
 
     const lastBar = candles[candles.length - 1];
 
+    // Manual close from panel
+    if (pos.manualClose) {
+      log(`EXIT ${pos.ticker}: manual_close`);
+      await doExit(pos, lastBar.c, 'manual_close', state, instrMap);
+      continue;
+    }
+
     // Max hold exit
     if (held >= pos.tier.maxHold) {
       log(`EXIT ${pos.ticker}: max_hold (${held}d)`);
       await doExit(pos, lastBar.c, 'max_hold', state, instrMap);
       continue;
+    }
+
+    // Recover missing stop-loss order (e.g. placeStop failed on entry)
+    if (!pos.stopOrderId && instrMap[pos.ticker]?.uid) {
+      log(`WARN ${pos.ticker}: no stop order — placing recovery stop @ ${pos.catStopPx.toFixed(2)}`);
+      try {
+        const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker].uid, pos.lots, pos.catStopPx, DRY_RUN, log);
+        pos.stopOrderId = id;
+        pos.currentStopPx = pos.catStopPx;
+      } catch (e) { log(`WARN ${pos.ticker}: recovery stop failed: ${e.message}`); }
     }
 
     // Trailing stop update (broker-side order)
@@ -172,9 +189,11 @@ async function managePositions(state, candleMap, divMap, instrMap) {
       if (newStop > (pos.currentStopPx || 0) + 0.01) {
         log(`STOP ${pos.ticker}: ${(pos.currentStopPx || 0).toFixed(2)} → ${newStop.toFixed(2)}`);
         if (pos.stopOrderId) await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log);
-        const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker]?.uid, pos.lots, newStop, DRY_RUN, log);
-        pos.stopOrderId = id;
-        pos.currentStopPx = newStop;
+        try {
+          const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker]?.uid, pos.lots, newStop, DRY_RUN, log);
+          pos.stopOrderId = id;
+          pos.currentStopPx = newStop;
+        } catch (e) { log(`WARN ${pos.ticker}: stop update failed: ${e.message}`); }
       }
     }
     if (divGapToday) log(`DIV_GAP ${pos.ticker}: skip stop checks`);
@@ -212,6 +231,9 @@ async function doEntries(state, candleMap, divMap, instrMap) {
     return;
   }
 
+  // Split budget evenly between strategies (each gets 50% of current cash)
+  const budgetPerStrategy = state.cashRub * 0.5;
+
   for (const strat of ['S1', 'S2']) {
     const cands = candidates.filter(s => s.strategy === strat);
     if (!cands.length) continue;
@@ -234,7 +256,7 @@ async function doEntries(state, candleMap, divMap, instrMap) {
 
     cands.sort((a, b) => b.vr - a.vr);
     const toEnter = cands.slice(0, slots);
-    const budget = state.cashRub * 0.5;
+    const budget = Math.min(budgetPerStrategy, state.cashRub);
     const sized = allocByVr(toEnter, budget, instrMap);
 
     for (const s of sized) {
@@ -252,7 +274,10 @@ async function doEntries(state, candleMap, divMap, instrMap) {
 
       const result = await executeBuy(TOKEN, ACCOUNT, uid, lots, DRY_RUN, log);
       if (result.filled) {
-        const catStopPx = px * (1 - P.stopPct / 100);
+        // Use actual execution price if available, fall back to last price
+        const fillPx = result.executedPrice || px;
+        if (result.executedPrice) log(`FILL ${s.secid}: exec @${fillPx.toFixed(2)} (last was ${px.toFixed(2)})`);
+        const catStopPx = fillPx * (1 - P.stopPct / 100);
         let stopId = null;
         try { stopId = await placeStop(TOKEN, ACCOUNT, uid, result.lots, catStopPx, DRY_RUN, log); }
         catch (e) { log(`WARN: stop ${s.secid}: ${e.message}`); }
@@ -260,7 +285,7 @@ async function doEntries(state, candleMap, divMap, instrMap) {
         state.positions.push({
           ticker: s.secid, uid, strategy: s.strategy, tier: s.tier,
           vr: s.vr, atr20: s.atr, signalDate: s.date, entryDate: todayMSK(),
-          entryPrice: px, catStopPx, lots: result.lots, peak: px, held: 0,
+          entryPrice: fillPx, catStopPx, lots: result.lots, lotSize, peak: fillPx, held: 0,
           stopOrderId: stopId, currentStopPx: catStopPx, status: 'open',
         });
       }
@@ -279,7 +304,7 @@ async function updateCurve(state, instrMap) {
       const prices = await tkf.getLastPrices(TOKEN, uids);
       for (const pos of state.positions.filter(p => p.status === 'open')) {
         const px = prices[instrMap[pos.ticker]?.uid] || pos.entryPrice;
-        openVal += pos.lots * (instrMap[pos.ticker]?.lot || 1) * px;
+        openVal += pos.lots * (pos.lotSize || instrMap[pos.ticker]?.lot || 1) * px;
       }
     }
     recordCurvePoint(state, state.cashRub + openVal, state.cashRub, state.positions.filter(p => p.status === 'open').length);

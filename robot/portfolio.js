@@ -114,26 +114,6 @@ export function findAtrRotation(candidate, openPositions) {
   return null;
 }
 
-/* ═══ ENTRY PLAN (spec 12.6) ═══ */
-
-/**
- * Build an entry plan from candidates, budget, and instrument map.
- */
-export function buildEntryPlan(candidates, budgetS1, budgetS2, instrMap) {
-  const s1 = candidates.filter(s => s.strategy === 'S1');
-  const s2 = candidates.filter(s => s.strategy === 'S2');
-
-  const plan = {
-    candidates: [
-      ...allocByVr(s1, budgetS1, instrMap),
-      ...allocByVr(s2, budgetS2, instrMap),
-    ],
-    budget: { S1: budgetS1, S2: budgetS2 },
-    signalDate: candidates[0]?.date || '',
-  };
-  return plan;
-}
-
 /* ═══ ORDER EXECUTION WITH MARGIN RETRY (spec 12.5) ═══ */
 
 /**
@@ -143,7 +123,7 @@ export function buildEntryPlan(candidates, budgetS1, budgetS2, instrMap) {
 export async function executeBuy(token, accountId, instrumentId, targetLots, dryRun, log) {
   if (dryRun) {
     log(`DRY_RUN: would buy ${targetLots} lots`);
-    return { filled: true, lots: targetLots, orderId: null };
+    return { filled: true, lots: targetLots, orderId: null, executedPrice: null };
   }
 
   const retryLots = tkf.buildRetryLots(targetLots);
@@ -153,7 +133,9 @@ export async function executeBuy(token, accountId, instrumentId, targetLots, dry
         instrumentId, quantity: lots,
         direction: 'ORDER_DIRECTION_BUY', accountId,
       });
-      return { filled: true, lots, orderId: res.orderId };
+      // Extract executed price from order response if available
+      const execPx = tkf.quotToNum(res.executedOrderPrice) || tkf.quotToNum(res.averagePositionPrice) || null;
+      return { filled: true, lots, orderId: res.orderId, executedPrice: execPx };
     } catch (e) {
       if (tkf.isMarginError(e)) {
         log(`Margin error at ${lots} lots, retrying smaller...`);
@@ -162,7 +144,7 @@ export async function executeBuy(token, accountId, instrumentId, targetLots, dry
       throw e; // non-margin error — propagate
     }
   }
-  return { filled: false, lots: 0, orderId: null };
+  return { filled: false, lots: 0, orderId: null, executedPrice: null };
 }
 
 /**

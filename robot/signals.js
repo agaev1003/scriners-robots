@@ -116,10 +116,11 @@ export function dayRet(data, i) {
 
 /**
  * Returns tier object {name, minVr, maxHold, tsAfter, tsDist} or null.
- * First match wins (ULTRA > STRONG > BASE).
+ * Sorted by minVr descending so highest tier matches first (ULTRA > STRONG > BASE).
  */
+const _sortedTiers = [...P.tiers].sort((a, b) => b.minVr - a.minVr);
 export function getTier(vr) {
-  for (const t of P.tiers) {
+  for (const t of _sortedTiers) {
     if (vr >= t.minVr) return t;
   }
   return null;
