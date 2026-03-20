@@ -9,9 +9,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import * as tkf from './tinkoff.js';
-import { P, BLACKLIST, scanTicker, isDivGap } from './signals.js';
+import { P, BLACKLIST, scanTicker } from './signals.js';
 import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint } from './state.js';
-import { updatePositionFromCandles, checkExit, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
+import { updatePositionFromCandles, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
 import { startPanel } from './panel.js';
 
@@ -188,8 +188,8 @@ async function managePositions(state, candleMap, divMap, instrMap) {
       const newStop = Math.max(tsPx, pos.catStopPx);
       if (newStop > (pos.currentStopPx || 0) + 0.01) {
         log(`STOP ${pos.ticker}: ${(pos.currentStopPx || 0).toFixed(2)} → ${newStop.toFixed(2)}`);
-        if (pos.stopOrderId) await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log);
         try {
+          if (pos.stopOrderId) await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log);
           const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker]?.uid, pos.lots, newStop, DRY_RUN, log);
           pos.stopOrderId = id;
           pos.currentStopPx = newStop;
@@ -202,9 +202,13 @@ async function managePositions(state, candleMap, divMap, instrMap) {
 
 async function doExit(pos, price, reason, state, instrMap) {
   const uid = instrMap[pos.ticker]?.uid;
-  if (pos.stopOrderId) await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log);
+  if (pos.stopOrderId) {
+    try { await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log); }
+    catch (e) { log(`WARN ${pos.ticker}: cancel stop failed: ${e.message}`); }
+  }
   if (uid) await executeSell(TOKEN, ACCOUNT, uid, pos.lots, DRY_RUN, log);
 
+  state.cashRub += price * pos.lots * (pos.lotSize || 1);
   const trade = recordTrade(state, pos, price, todayMSK(), reason);
   pos.status = 'closed';
   log(`EXIT ${pos.ticker}: ${reason} ret=${trade.ret.toFixed(2)}%`);
@@ -282,14 +286,16 @@ async function doEntries(state, candleMap, divMap, instrMap) {
         try { stopId = await placeStop(TOKEN, ACCOUNT, uid, result.lots, catStopPx, DRY_RUN, log); }
         catch (e) { log(`WARN: stop ${s.secid}: ${e.message}`); }
 
+        const posCost = fillPx * result.lots * lotSize;
+        state.cashRub -= posCost;
         state.positions.push({
           ticker: s.secid, uid, strategy: s.strategy, tier: s.tier,
           vr: s.vr, atr20: s.atr, signalDate: s.date, entryDate: todayMSK(),
           entryPrice: fillPx, catStopPx, lots: result.lots, lotSize, peak: fillPx, held: 0,
           stopOrderId: stopId, currentStopPx: catStopPx, status: 'open',
         });
+        markProcessed(state, s.secid, s.date);
       }
-      markProcessed(state, s.secid, s.date);
     }
   }
 }
@@ -338,13 +344,15 @@ export async function runCycle() {
   log(`Candles: ${Object.keys(candleMap).length} tickers`);
 
   await managePositions(state, candleMap, divMap, instrMap);
-  state.positions = state.positions.filter(p => p.status === 'open');
 
   if (isEntryWindow()) {
     await doEntries(state, candleMap, divMap, instrMap);
   } else {
     log('Outside entry window');
   }
+
+  // Remove closed positions (from managePositions exits and ATR rotation)
+  state.positions = state.positions.filter(p => p.status === 'open');
 
   await updateCurve(state, instrMap);
 

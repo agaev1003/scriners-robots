@@ -27,10 +27,25 @@ export function emptyState() {
   };
 }
 
+/* ─── Default tier (used when deserialized tier is missing required fields) ─── */
+const DEFAULT_TIER = { name: 'BASE', minVr: 2.0, maxHold: 10, tsAfter: 3, tsDist: 3 };
+
+function validateTier(tier) {
+  if (!tier || typeof tier.maxHold !== 'number' || typeof tier.tsAfter !== 'number' || typeof tier.tsDist !== 'number') {
+    return DEFAULT_TIER;
+  }
+  return tier;
+}
+
 /* ─── Load state from disk ─── */
 export function loadState() {
   try {
-    return JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    const st = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+    // Validate tier objects on open positions (they lose prototype after JSON round-trip)
+    for (const pos of st.positions || []) {
+      pos.tier = validateTier(pos.tier);
+    }
+    return st;
   } catch {
     return emptyState();
   }

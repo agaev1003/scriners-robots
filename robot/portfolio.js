@@ -1,7 +1,7 @@
 // portfolio.js — Position management, sizing, stops, ATR rotation
 // Spec: TRADING_SYSTEM_SPEC.txt, Parts 5-6
 
-import { P, isDivGap, getTier, atrPct, avgValueRub } from './signals.js';
+import { P, isDivGap } from './signals.js';
 import * as tkf from './tinkoff.js';
 
 /* ═══ TIERS & STOPS ═══ */

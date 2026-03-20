@@ -16,7 +16,7 @@ function quotToNum(q) {
 }
 
 function numToQuot(n) {
-  const units = Math.floor(n);
+  const units = Math.trunc(n);
   const nano = Math.round((n - units) * 1e9);
   return { units: String(units), nano };
 }
@@ -62,7 +62,7 @@ async function fetchTkf(endpoint, body, token) {
       clearTimeout(timer);
       lastErr = e;
       // Don't retry client errors
-      if (e.status >= 400 && e.status < 500) throw e;
+      if (e.status !== undefined && e.status >= 400 && e.status < 500) throw e;
     }
   }
   throw lastErr;

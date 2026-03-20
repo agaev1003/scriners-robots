@@ -79,7 +79,6 @@ export function startPanel(port, dryRun, log) {
 
         if (path === '/api/signals') {
           // Show processed signals from the last day
-          const today = new Date().toISOString().slice(0, 10);
           const recent = {};
           for (const [key, ts] of Object.entries(st.processedSignals)) {
             const age = Date.now() - ts;

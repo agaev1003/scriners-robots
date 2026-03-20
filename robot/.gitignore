@@ -1,4 +1,4 @@
 .env
-*.state.json
+state.json
 node_modules/
 robot.log
