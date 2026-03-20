@@ -1,0 +1,10 @@
+{
+  "name": "moex-robot",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node robot.mjs",
+    "test-api": "node test-tinkoff.js"
+  }
+}
