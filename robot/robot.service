@@ -1,0 +1,29 @@
+# systemd service for moex-robot
+# Install: sudo cp robot.service /etc/systemd/system/moex-robot.service
+#          sudo systemctl daemon-reload
+#          sudo systemctl enable moex-robot
+#          sudo systemctl start moex-robot
+#
+# Alternative: use cron for periodic runs:
+#   */30 7-18 * * 1-5 cd /home/user/scriners-robots/robot && node robot.mjs >> /var/log/moex-robot.log 2>&1
+
+[Unit]
+Description=MOEX Trading Robot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=user
+WorkingDirectory=/home/user/scriners-robots/robot
+EnvironmentFile=/home/user/scriners-robots/robot/.env
+ExecStart=/usr/bin/node robot.mjs
+Restart=on-failure
+RestartSec=60
+
+# Logging
+StandardOutput=append:/var/log/moex-robot.log
+StandardError=append:/var/log/moex-robot.log
+
+[Install]
+WantedBy=multi-user.target

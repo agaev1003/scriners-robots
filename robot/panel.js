@@ -1,0 +1,160 @@
+// panel.js — Web panel API server
+// Spec: TRADING_SYSTEM_SPEC.txt, section 12.9
+//
+// Routes:
+//   GET  /api/status      — mode, lastRunAt, positions, cash, exposure
+//   GET  /api/positions   — open positions with details
+//   GET  /api/history     — closed trades (last 100)
+//   GET  /api/curve       — equity curve (last 500 points)
+//   GET  /api/signals     — current pending signals (from last scan)
+//   GET  /api/config      — robot parameters
+//   GET  /api/logs        — last 50 log lines
+//   POST /api/close/:ticker — request manual close
+//   POST /api/force-scan    — trigger a cycle
+
+import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { loadState, saveState } from './state.js';
+import { P } from './signals.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const LOG_FILE = join(__dirname, 'robot.log');
+
+let _forceScanCallback = null;
+
+/**
+ * Register a callback for force-scan POST requests.
+ */
+export function onForceScan(cb) {
+  _forceScanCallback = cb;
+}
+
+/**
+ * Start the web panel HTTP server.
+ */
+export function startPanel(port, dryRun, log) {
+  const srv = createServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return; }
+
+    const url = new URL(req.url, `http://localhost:${port}`);
+    const path = url.pathname;
+
+    try {
+      // ── GET routes ──
+      if (req.method === 'GET') {
+        const st = loadState();
+
+        if (path === '/api/status') {
+          const open = st.positions.filter(p => p.status === 'open');
+          const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots, 0);
+          return json(res, {
+            mode: dryRun ? 'dry_run' : 'live',
+            lastRunAt: st.lastRunAt,
+            livePrimedAt: st.livePrimedAt,
+            positionCount: open.length,
+            cashRub: st.cashRub,
+            exposureRub: exposure,
+            processedSignals: Object.keys(st.processedSignals).length,
+          });
+        }
+
+        if (path === '/api/positions') {
+          return json(res, st.positions.filter(p => p.status === 'open'));
+        }
+
+        if (path === '/api/history') {
+          return json(res, st.history.slice(-100).reverse());
+        }
+
+        if (path === '/api/curve') {
+          return json(res, st.accountCurve.slice(-500));
+        }
+
+        if (path === '/api/signals') {
+          // Show processed signals from the last day
+          const today = new Date().toISOString().slice(0, 10);
+          const recent = {};
+          for (const [key, ts] of Object.entries(st.processedSignals)) {
+            const age = Date.now() - ts;
+            if (age < 86400_000) recent[key] = new Date(ts).toISOString();
+          }
+          return json(res, recent);
+        }
+
+        if (path === '/api/config') {
+          return json(res, {
+            P,
+            DRY_RUN: dryRun,
+            ACCOUNT: process.env.TKF_ACCOUNT_ID ? '***' : '',
+            MAX_CAPITAL_RUB: 50_000,
+          });
+        }
+
+        if (path === '/api/logs') {
+          try {
+            const raw = readFileSync(LOG_FILE, 'utf8');
+            const lines = raw.trim().split('\n').slice(-50);
+            return json(res, lines);
+          } catch {
+            return json(res, []);
+          }
+        }
+      }
+
+      // ── POST routes ──
+      if (req.method === 'POST') {
+        // POST /api/close/:ticker
+        const closeMatch = path.match(/^\/api\/close\/([A-Z]+)$/);
+        if (closeMatch) {
+          const ticker = closeMatch[1];
+          const st = loadState();
+          const pos = st.positions.find(p => p.status === 'open' && p.ticker === ticker);
+          if (!pos) {
+            res.statusCode = 404;
+            return json(res, { error: `No open position for ${ticker}` });
+          }
+          // Mark for manual close — robot will pick this up next cycle
+          pos.manualClose = true;
+          saveState(st);
+          log(`PANEL: manual close requested for ${ticker}`);
+          return json(res, { ok: true, ticker, message: 'Close requested, will execute next cycle' });
+        }
+
+        // POST /api/force-scan
+        if (path === '/api/force-scan') {
+          if (_forceScanCallback) {
+            log('PANEL: force-scan triggered');
+            _forceScanCallback();
+            return json(res, { ok: true, message: 'Scan triggered' });
+          }
+          return json(res, { ok: false, message: 'No scan callback registered' });
+        }
+      }
+
+      // 404
+      res.statusCode = 404;
+      json(res, { error: 'not found', routes: [
+        'GET /api/status', 'GET /api/positions', 'GET /api/history',
+        'GET /api/curve', 'GET /api/signals', 'GET /api/config', 'GET /api/logs',
+        'POST /api/close/:ticker', 'POST /api/force-scan',
+      ]});
+    } catch (e) {
+      res.statusCode = 500;
+      json(res, { error: e.message });
+    }
+  });
+
+  srv.listen(port, () => log(`Panel: http://localhost:${port}`));
+  return srv;
+}
+
+function json(res, data) {
+  res.end(JSON.stringify(data));
+}
