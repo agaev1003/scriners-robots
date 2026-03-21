@@ -21,6 +21,8 @@ import { P } from './signals.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_FILE = join(__dirname, 'robot.log');
+let INDEX_HTML = '';
+try { INDEX_HTML = readFileSync(join(__dirname, 'index.html'), 'utf8'); } catch {}
 
 let _forceScanCallback = null;
 
@@ -47,6 +49,13 @@ export function startPanel(port, dryRun, log) {
     const path = url.pathname;
 
     try {
+      // ── Serve web panel ──
+      if (req.method === 'GET' && (path === '/' || path === '/index.html')) {
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.end(INDEX_HTML);
+        return;
+      }
+
       // ── GET routes ──
       if (req.method === 'GET') {
         const st = loadState();
@@ -70,11 +79,11 @@ export function startPanel(port, dryRun, log) {
         }
 
         if (path === '/api/history') {
-          return json(res, st.history.slice(-100).reverse());
+          return json(res, st.history.reverse());
         }
 
         if (path === '/api/curve') {
-          return json(res, st.accountCurve.slice(-500));
+          return json(res, st.accountCurve);
         }
 
         if (path === '/api/signals') {

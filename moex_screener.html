@@ -1015,6 +1015,13 @@ function renderSignals(){
   }).join('');
 }
 
+/* ─── Exit Reasons (Russian) ─── */
+const EXIT_REASONS = {
+  max_hold: 'Макс. удержание', cat_stop: 'Кат. стоп', trailing_stop: 'Трейлинг-стоп',
+  rotate_atr: 'Ротация ATR', manual_close: 'Ручное закрытие', broker_gone: 'Закрыта брокером', open: 'Открыта',
+};
+function exitReason(r) { return EXIT_REASONS[r] || r; }
+
 /* ─── Portfolio UI ─── */
 let portResults = {combined:null, s1:null, s2:null};
 let activePortTab = 'combined';
@@ -1079,7 +1086,7 @@ function renderPortfolio(){
     <td>${t.ep.toFixed(2)}</td><td>${t.exitPrice.toFixed(2)}</td>
     <td>${t.entryDate}</td><td>${t.exitDate}</td>
     <td class="${t.ret>=0?'ret-pos':'ret-neg'}">${t.ret>=0?'+':''}${t.ret.toFixed(2)}%</td>
-    <td>${t.reason}</td><td>${t.held}</td>
+    <td>${exitReason(t.reason)}</td><td>${t.held}</td>
   </tr>`).join('');
 }
 

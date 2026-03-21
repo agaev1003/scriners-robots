@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trading Panel — Insides Without Inside</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a;--yellow:#f1c40f}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh}
+
+header{background:var(--surface);padding:18px 24px;border-bottom:2px solid var(--accent);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+header h1{font-size:1.5rem;font-weight:700;letter-spacing:1px}
+header .subtitle{color:var(--muted);font-size:.82rem}
+.header-right{display:flex;align-items:center;gap:12px}
+.mode-pill{padding:4px 14px;border-radius:12px;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.mode-live{background:#e9456033;color:var(--accent);border:1px solid var(--accent)}
+.mode-dry{background:#f1c40f33;color:var(--yellow);border:1px solid var(--yellow)}
+.last-run{font-size:.78rem;color:var(--muted)}
+
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 24px;background:var(--surface);border-bottom:1px solid var(--border)}
+.toolbar button{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:opacity .2s}
+.toolbar button:hover{opacity:.85}
+.toolbar .btn-secondary{background:var(--border);color:var(--text)}
+.toolbar .refresh-info{font-size:.75rem;color:var(--muted);margin-left:auto}
+
+.stats-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:16px 24px}
+.stat-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;text-align:center}
+.stat-card .label{font-size:.7rem;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.stat-card .value{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums}
+
+.section{padding:0 24px 20px}
+.section h2{font-size:1.1rem;margin:20px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--accent);color:var(--text)}
+
+.chart-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px}
+.chart-wrap canvas{width:100%!important;max-height:260px}
+
+.summary-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-bottom:16px}
+.summary-item{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;text-align:center}
+.summary-item .s-label{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}
+.summary-item .s-val{font-size:1.1rem;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums}
+
+table.data-table{width:100%;border-collapse:collapse;font-size:.82rem}
+table.data-table th{background:var(--surface);color:var(--muted);padding:8px 10px;text-align:left;font-weight:600;border-bottom:2px solid var(--border);position:sticky;top:0;z-index:1}
+table.data-table td{padding:6px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}
+table.data-table tr:hover{background:var(--surface)}
+.table-wrap{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:16px}
+
+.ret-pos{color:var(--green);font-weight:600}
+.ret-neg{color:var(--red);font-weight:600}
+
+.tier-badge{padding:2px 8px;border-radius:8px;font-size:.72rem;font-weight:700;text-transform:uppercase}
+.tier-ULTRA{background:#9b59b644;color:#c39bd3;border:1px solid #9b59b6}
+.tier-STRONG{background:#3498db44;color:#85c1e9;border:1px solid #3498db}
+.tier-BASE{background:#7f8c8d44;color:#bdc3c7;border:1px solid #7f8c8d}
+
+.btn-close{background:var(--red);color:#fff;border:none;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:.75rem;font-weight:600}
+.btn-close:hover{opacity:.8}
+
+.signals-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.signal-pill{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:4px 12px;font-size:.78rem;color:var(--muted)}
+
+.logs-box{background:#0a0a1a;border:1px solid var(--border);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:.75rem;line-height:1.6;color:var(--muted)}
+.logs-box .log-line{white-space:pre-wrap;word-break:break-all}
+.logs-box .log-line:hover{color:var(--text)}
+
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+
+.empty-msg{text-align:center;padding:30px;color:var(--muted);font-size:.9rem}
+
+.error-banner{background:#e9456033;border:1px solid var(--accent);border-radius:8px;padding:12px 20px;margin:10px 24px;color:var(--accent);font-size:.85rem;display:none}
+
+@media(max-width:900px){
+  .two-col{grid-template-columns:1fr}
+  .stats-row{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+  header{padding:12px 16px}
+  .section{padding:0 16px 16px}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Trading Panel</h1>
+    <div class="subtitle">Insides Without Inside — Панель управления роботом</div>
+  </div>
+  <div class="header-right">
+    <span id="modePill" class="mode-pill mode-dry">DRY RUN</span>
+    <span id="lastRun" class="last-run"></span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button onclick="forceScan()">Force Scan</button>
+  <button class="btn-secondary" onclick="loadAll()">Обновить</button>
+  <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
+    <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто (30с)
+  </label>
+  <div class="refresh-info" id="refreshInfo"></div>
+</div>
+
+<div id="errorBanner" class="error-banner"></div>
+
+<!-- Status cards -->
+<div class="stats-row" id="statusCards">
+  <div class="stat-card"><div class="label">Свободный кэш</div><div class="value" id="vCash">—</div></div>
+  <div class="stat-card"><div class="label">Экспозиция</div><div class="value" id="vExposure">—</div></div>
+  <div class="stat-card"><div class="label">Общий капитал</div><div class="value" id="vTotal">—</div></div>
+  <div class="stat-card"><div class="label">P&L от старта</div><div class="value" id="vPnl">—</div></div>
+  <div class="stat-card"><div class="label">Дневной P&L</div><div class="value" id="vDailyPnl">—</div></div>
+  <div class="stat-card"><div class="label">Позиции</div><div class="value" id="vPosCount">—</div></div>
+  <div class="stat-card"><div class="label">Первый запуск</div><div class="value" id="vFirstRun" style="font-size:.85rem">—</div></div>
+</div>
+
+<!-- Equity curve -->
+<div class="section">
+  <h2>Кривая капитала</h2>
+  <div class="chart-wrap"><canvas id="equityChart"></canvas></div>
+</div>
+
+<!-- Drawdown -->
+<div class="section">
+  <h2>Просадка от пика</h2>
+  <div class="chart-wrap"><canvas id="drawdownChart"></canvas></div>
+</div>
+
+<!-- Summary statistics -->
+<div class="section">
+  <h2>Статистика</h2>
+  <div class="summary-grid" id="summaryStats"></div>
+</div>
+
+<!-- Open positions -->
+<div class="section">
+  <h2>Открытые позиции</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr>
+        <th>Тикер</th><th>Стратегия</th><th>Тир</th><th>VR</th><th>ATR%</th>
+        <th>Дата входа</th><th>Цена входа</th><th>Кат. стоп</th><th>Тек. стоп</th>
+        <th>Пик</th><th>Дней</th><th>Осталось</th><th>Действие</th>
+      </tr></thead>
+      <tbody id="positionsBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Trade P&L chart -->
+<div class="section">
+  <h2>P&L по сделкам</h2>
+  <div class="chart-wrap"><canvas id="tradePnlChart"></canvas></div>
+</div>
+
+<!-- History -->
+<div class="section">
+  <h2>История сделок</h2>
+  <div class="table-wrap" style="max-height:500px">
+    <table class="data-table">
+      <thead><tr>
+        <th>Тикер</th><th>Стратегия</th><th>Тир</th><th>VR</th>
+        <th>Вход</th><th>Выход</th><th>Дата входа</th><th>Дата выхода</th>
+        <th>Результат</th><th>Причина</th><th>Дней</th>
+      </tr></thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Signals + Logs -->
+<div class="section">
+  <div class="two-col">
+    <div>
+      <h2>Обработанные сигналы (24ч)</h2>
+      <div class="signals-list" id="signalsList"><span class="empty-msg">Нет сигналов</span></div>
+    </div>
+    <div>
+      <h2>Лог робота</h2>
+      <div class="logs-box" id="logsBox"><div class="empty-msg">Нет данных</div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══ CONSTANTS ═══ */
+const INITIAL_CAPITAL = 50000;
+const EXIT_REASONS = {
+  max_hold: 'Макс. удержание',
+  cat_stop: 'Кат. стоп',
+  trailing_stop: 'Трейлинг-стоп',
+  rotate_atr: 'Ротация ATR',
+  manual_close: 'Ручное закрытие',
+  broker_gone: 'Закрыта брокером',
+  open: 'Открыта',
+};
+
+function exitReason(r) { return EXIT_REASONS[r] || r; }
+function fmtRub(n) { return n != null ? n.toLocaleString('ru-RU', {maximumFractionDigits:0}) + ' ₽' : '—'; }
+function fmtPct(n, dec=1) { return n != null ? (n >= 0 ? '+' : '') + n.toFixed(dec) + '%' : '—'; }
+function fmtPrice(n) { return n != null ? n.toFixed(2) : '—'; }
+function fmtDate(iso) { return iso ? iso.slice(0,10) : '—'; }
+function fmtTime(iso) { return iso ? iso.slice(11,19) : ''; }
+function pnlClass(v) { return v >= 0 ? 'ret-pos' : 'ret-neg'; }
+
+/* ═══ STATE ═══ */
+let autoTimer = null;
+let chartEquity = null, chartDrawdown = null, chartTradePnl = null;
+let cachedData = { status: null, positions: [], history: [], curve: [], signals: {}, config: null, logs: [] };
+
+/* ═══ API ═══ */
+const API = '';
+async function api(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`${r.status} ${path}`);
+  return r.json();
+}
+
+async function loadAll() {
+  const t0 = Date.now();
+  try {
+    const [status, positions, history, curve, signals, config, logs] = await Promise.all([
+      api('/api/status'), api('/api/positions'), api('/api/history'),
+      api('/api/curve'), api('/api/signals'), api('/api/config'), api('/api/logs'),
+    ]);
+    cachedData = { status, positions, history, curve, signals, config, logs };
+    hideError();
+    renderAll();
+  } catch (e) {
+    showError('Ошибка загрузки: ' + e.message);
+  }
+  document.getElementById('refreshInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
+}
+
+function showError(msg) { const el = document.getElementById('errorBanner'); el.textContent = msg; el.style.display = 'block'; }
+function hideError() { document.getElementById('errorBanner').style.display = 'none'; }
+
+/* ═══ RENDER ALL ═══ */
+function renderAll() {
+  renderStatus();
+  renderEquity();
+  renderDrawdown();
+  renderSummary();
+  renderPositions();
+  renderTradePnl();
+  renderHistory();
+  renderSignals();
+  renderLogs();
+}
+
+/* ═══ STATUS CARDS ═══ */
+function renderStatus() {
+  const s = cachedData.status;
+  const cfg = cachedData.config;
+  const curve = cachedData.curve;
+  if (!s) return;
+
+  // Mode pill
+  const pill = document.getElementById('modePill');
+  if (s.mode === 'live') { pill.textContent = 'LIVE'; pill.className = 'mode-pill mode-live'; }
+  else { pill.textContent = 'DRY RUN'; pill.className = 'mode-pill mode-dry'; }
+
+  // Last run
+  document.getElementById('lastRun').textContent = s.lastRunAt
+    ? 'Послед. цикл: ' + fmtDate(s.lastRunAt) + ' ' + fmtTime(s.lastRunAt)
+    : 'Ещё не запускался';
+
+  // Cards
+  const total = (s.cashRub || 0) + (s.exposureRub || 0);
+  const pnl = total - INITIAL_CAPITAL;
+  const pnlPct = (pnl / INITIAL_CAPITAL) * 100;
+
+  document.getElementById('vCash').textContent = fmtRub(s.cashRub);
+  document.getElementById('vExposure').textContent = fmtRub(s.exposureRub);
+
+  const vTotal = document.getElementById('vTotal');
+  vTotal.textContent = fmtRub(total);
+
+  const vPnl = document.getElementById('vPnl');
+  vPnl.textContent = fmtPct(pnlPct);
+  vPnl.style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
+
+  document.getElementById('vPosCount').textContent = s.positionCount || 0;
+  document.getElementById('vFirstRun').textContent = s.livePrimedAt ? fmtDate(s.livePrimedAt) : '—';
+
+  // Daily P&L from curve
+  const vDaily = document.getElementById('vDailyPnl');
+  if (curve.length >= 2) {
+    const last = curve[curve.length - 1];
+    const prev = curve[curve.length - 2];
+    const dailyPnl = last.totalRub - prev.totalRub;
+    const dailyPct = (dailyPnl / prev.totalRub) * 100;
+    vDaily.textContent = fmtPct(dailyPct);
+    vDaily.style.color = dailyPnl >= 0 ? 'var(--green)' : 'var(--red)';
+  } else {
+    vDaily.textContent = '—';
+  }
+}
+
+/* ═══ EQUITY CHART ═══ */
+function renderEquity() {
+  const curve = cachedData.curve;
+  if (!curve.length) return;
+  const labels = curve.map(p => fmtDate(p.at));
+  const data = curve.map(p => p.totalRub);
+
+  if (chartEquity) chartEquity.destroy();
+  chartEquity = new Chart(document.getElementById('equityChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Капитал (₽)',
+        data,
+        borderColor: '#e94560',
+        backgroundColor: '#e9456022',
+        fill: true,
+        tension: 0.3,
+        pointRadius: data.length > 100 ? 0 : 2,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => fmtRub(ctx.raw) } },
+      },
+      scales: {
+        x: { ticks: { color: '#999', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#2a2a4a' } },
+        y: { ticks: { color: '#999', callback: v => (v/1000).toFixed(0)+'k' }, grid: { color: '#2a2a4a' } },
+      },
+      interaction: { intersect: false, mode: 'index' },
+    }
+  });
+}
+
+/* ═══ DRAWDOWN CHART ═══ */
+function renderDrawdown() {
+  const curve = cachedData.curve;
+  if (!curve.length) return;
+  const labels = curve.map(p => fmtDate(p.at));
+  let peak = 0;
+  const dd = curve.map(p => {
+    if (p.totalRub > peak) peak = p.totalRub;
+    return peak > 0 ? -((peak - p.totalRub) / peak * 100) : 0;
+  });
+
+  if (chartDrawdown) chartDrawdown.destroy();
+  chartDrawdown = new Chart(document.getElementById('drawdownChart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Просадка %',
+        data: dd,
+        borderColor: '#e17055',
+        backgroundColor: '#e1705533',
+        fill: true,
+        tension: 0.3,
+        pointRadius: dd.length > 100 ? 0 : 2,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ctx.raw.toFixed(2) + '%' } },
+      },
+      scales: {
+        x: { ticks: { color: '#999', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#2a2a4a' } },
+        y: { ticks: { color: '#999', callback: v => v.toFixed(1)+'%' }, grid: { color: '#2a2a4a' },
+             max: 0 },
+      },
+      interaction: { intersect: false, mode: 'index' },
+    }
+  });
+}
+
+/* ═══ SUMMARY STATS ═══ */
+function renderSummary() {
+  const trades = cachedData.history;
+  const curve = cachedData.curve;
+  if (!trades.length && !curve.length) {
+    document.getElementById('summaryStats').innerHTML = '<div class="empty-msg">Нет данных</div>';
+    return;
+  }
+
+  const closed = trades.filter(t => t.status === 'closed' || t.exitReason);
+  const wins = closed.filter(t => t.ret > 0);
+  const losses = closed.filter(t => t.ret <= 0);
+  const wr = closed.length ? (wins.length / closed.length * 100) : 0;
+  const avgRet = closed.length ? closed.reduce((s, t) => s + t.ret, 0) / closed.length : 0;
+  const grossWin = wins.reduce((s, t) => s + t.ret, 0);
+  const grossLoss = Math.abs(losses.reduce((s, t) => s + t.ret, 0));
+  const pf = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? Infinity : 0;
+  const best = closed.length ? Math.max(...closed.map(t => t.ret)) : 0;
+  const worst = closed.length ? Math.min(...closed.map(t => t.ret)) : 0;
+
+  // Duration
+  const durations = closed.map(t => {
+    if (t.held != null) return t.held;
+    if (t.entryDate && t.exitDate) return Math.round((new Date(t.exitDate) - new Date(t.entryDate)) / 86400000);
+    return 0;
+  });
+  const avgDur = durations.length ? (durations.reduce((a, b) => a + b, 0) / durations.length) : 0;
+
+  // Max drawdown from curve
+  let peak = 0, maxDD = 0;
+  for (const p of curve) {
+    if (p.totalRub > peak) peak = p.totalRub;
+    const dd = peak > 0 ? (peak - p.totalRub) / peak * 100 : 0;
+    if (dd > maxDD) maxDD = dd;
+  }
+
+  const items = [
+    { label: 'Всего сделок', val: closed.length, color: '' },
+    { label: 'Win Rate', val: wr.toFixed(1) + '%', color: wr >= 50 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Средн. доход', val: fmtPct(avgRet, 2), color: avgRet >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Profit Factor', val: pf === Infinity ? '∞' : pf.toFixed(2), color: pf >= 1 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Лучшая', val: fmtPct(best, 2), color: 'var(--green)' },
+    { label: 'Худшая', val: fmtPct(worst, 2), color: 'var(--red)' },
+    { label: 'Средн. длит.', val: avgDur.toFixed(1) + ' дн.', color: '' },
+    { label: 'Макс. просадка', val: maxDD.toFixed(1) + '%', color: 'var(--red)' },
+  ];
+
+  document.getElementById('summaryStats').innerHTML = items.map(it =>
+    `<div class="summary-item">
+      <div class="s-label">${it.label}</div>
+      <div class="s-val" ${it.color ? `style="color:${it.color}"` : ''}>${it.val}</div>
+    </div>`
+  ).join('');
+}
+
+/* ═══ OPEN POSITIONS ═══ */
+function renderPositions() {
+  const positions = cachedData.positions;
+  const body = document.getElementById('positionsBody');
+  if (!positions.length) {
+    body.innerHTML = '<tr><td colspan="13" class="empty-msg">Нет открытых позиций</td></tr>';
+    return;
+  }
+  body.innerHTML = positions.map(p => {
+    const tierName = p.tier?.name || 'BASE';
+    const maxHold = p.tier?.maxHold || 10;
+    const daysLeft = Math.max(0, maxHold - (p.held || 0));
+    return `<tr>
+      <td><b>${p.ticker}</b></td>
+      <td>${p.strategy || '—'}</td>
+      <td><span class="tier-badge tier-${tierName}">${tierName}</span></td>
+      <td>${p.vr ? p.vr.toFixed(1) : '—'}</td>
+      <td>${p.atr20 ? p.atr20.toFixed(1) + '%' : '—'}</td>
+      <td>${fmtDate(p.entryDate)}</td>
+      <td>${fmtPrice(p.entryPrice)}</td>
+      <td style="color:var(--red)">${fmtPrice(p.catStopPx)}</td>
+      <td>${fmtPrice(p.currentStopPx)}</td>
+      <td style="color:var(--yellow)">${fmtPrice(p.peak)}</td>
+      <td>${p.held ?? '—'}</td>
+      <td>${daysLeft} дн.</td>
+      <td><button class="btn-close" onclick="manualClose('${p.ticker}')">Закрыть</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* ═══ TRADE P&L CHART ═══ */
+function renderTradePnl() {
+  const trades = cachedData.history;
+  if (!trades.length) return;
+  const last = trades.slice(-60);
+  const labels = last.map(t => t.ticker + ' ' + fmtDate(t.exitDate));
+  const data = last.map(t => t.ret);
+  const colors = data.map(v => v >= 0 ? '#00b894' : '#e17055');
+
+  if (chartTradePnl) chartTradePnl.destroy();
+  chartTradePnl = new Chart(document.getElementById('tradePnlChart'), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'P&L %',
+        data,
+        backgroundColor: colors,
+        borderRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw, 2) } },
+      },
+      scales: {
+        x: { ticks: { color: '#999', maxRotation: 45, font: { size: 9 } }, grid: { display: false } },
+        y: { ticks: { color: '#999', callback: v => v.toFixed(0)+'%' }, grid: { color: '#2a2a4a' } },
+      },
+    }
+  });
+}
+
+/* ═══ HISTORY TABLE ═══ */
+function renderHistory() {
+  const trades = cachedData.history;
+  const body = document.getElementById('historyBody');
+  if (!trades.length) {
+    body.innerHTML = '<tr><td colspan="11" class="empty-msg">Нет закрытых сделок</td></tr>';
+    return;
+  }
+  // Already reversed from API (newest first)
+  body.innerHTML = trades.map(t => {
+    const tierName = t.tier?.name || t.tier || '—';
+    const dur = t.held != null ? t.held : '—';
+    return `<tr>
+      <td><b>${t.ticker}</b></td>
+      <td>${t.strategy || '—'}</td>
+      <td><span class="tier-badge tier-${tierName}">${tierName}</span></td>
+      <td>${t.vr ? t.vr.toFixed(1) : '—'}</td>
+      <td>${fmtPrice(t.entryPrice)}</td>
+      <td>${fmtPrice(t.exitPrice)}</td>
+      <td>${fmtDate(t.entryDate)}</td>
+      <td>${fmtDate(t.exitDate)}</td>
+      <td class="${pnlClass(t.ret)}">${fmtPct(t.ret, 2)}</td>
+      <td>${exitReason(t.exitReason)}</td>
+      <td>${dur}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ═══ SIGNALS ═══ */
+function renderSignals() {
+  const sigs = cachedData.signals;
+  const el = document.getElementById('signalsList');
+  const entries = Object.entries(sigs);
+  if (!entries.length) {
+    el.innerHTML = '<span class="empty-msg">Нет сигналов за 24ч</span>';
+    return;
+  }
+  entries.sort((a, b) => b[1].localeCompare(a[1]));
+  el.innerHTML = entries.map(([key, ts]) =>
+    `<span class="signal-pill" title="${ts}">${key.replace('_', ' ')}</span>`
+  ).join('');
+}
+
+/* ═══ LOGS ═══ */
+function renderLogs() {
+  const logs = cachedData.logs;
+  const el = document.getElementById('logsBox');
+  if (!logs.length) {
+    el.innerHTML = '<div class="empty-msg">Нет логов</div>';
+    return;
+  }
+  el.innerHTML = logs.map(line =>
+    `<div class="log-line">${line.replace(/</g,'&lt;')}</div>`
+  ).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ═══ ACTIONS ═══ */
+async function forceScan() {
+  try {
+    const r = await fetch(API + '/api/force-scan', { method: 'POST' });
+    const j = await r.json();
+    alert(j.message || 'Scan triggered');
+    setTimeout(loadAll, 3000);
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+async function manualClose(ticker) {
+  if (!confirm(`Закрыть позицию ${ticker}?`)) return;
+  try {
+    const r = await fetch(API + `/api/close/${ticker}`, { method: 'POST' });
+    const j = await r.json();
+    alert(j.message || 'OK');
+    setTimeout(loadAll, 2000);
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+/* ═══ AUTO-REFRESH ═══ */
+function toggleAuto() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  if (document.getElementById('chkAuto').checked) {
+    autoTimer = setInterval(loadAll, 30000);
+  }
+}
+
+/* ═══ INIT ═══ */
+loadAll();
+toggleAuto();
+</script>
+</body>
+</html>
