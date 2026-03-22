@@ -14,12 +14,14 @@
 
 import { createServer } from 'node:http';
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { loadState, saveState } from './state.js';
 import { P } from './signals.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const ROOT_DIR = join(__dirname, '..');
 const LOG_FILE = join(__dirname, 'robot.log');
 let INDEX_HTML = '';
 try { INDEX_HTML = readFileSync(join(__dirname, 'index.html'), 'utf8'); } catch {}
@@ -143,6 +145,33 @@ export function startPanel(port, dryRun, log) {
             return json(res, { ok: true, message: 'Scan triggered' });
           }
           return json(res, { ok: false, message: 'No scan callback registered' });
+        }
+
+        // POST /api/update — git pull + reload index.html
+        if (path === '/api/update') {
+          log('PANEL: git pull requested');
+          try {
+            const out = execSync('git pull origin main 2>&1', { cwd: ROOT_DIR, timeout: 30_000 }).toString();
+            // Reload index.html after update
+            try { INDEX_HTML = readFileSync(join(__dirname, 'index.html'), 'utf8'); } catch {}
+            log('PANEL: update result — ' + out.trim());
+            return json(res, { ok: true, message: out.trim() });
+          } catch (e) {
+            const msg = e.stderr?.toString() || e.stdout?.toString() || e.message;
+            log('PANEL: update failed — ' + msg);
+            return json(res, { ok: false, message: msg });
+          }
+        }
+
+        // POST /api/restart — restart panel service via systemctl
+        if (path === '/api/restart') {
+          log('PANEL: restart requested');
+          try {
+            execSync('sudo systemctl restart moex-panel moex-robot 2>&1 || true', { timeout: 10_000 });
+            return json(res, { ok: true, message: 'Перезапуск...' });
+          } catch (e) {
+            return json(res, { ok: false, message: e.message });
+          }
         }
       }
 

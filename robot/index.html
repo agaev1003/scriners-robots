@@ -23,6 +23,8 @@ header .subtitle{color:var(--muted);font-size:.82rem}
 .toolbar button{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:opacity .2s}
 .toolbar button:hover{opacity:.85}
 .toolbar .btn-secondary{background:var(--border);color:var(--text);border:1px solid #b0bec5}
+.toolbar .btn-update{background:#1e8449;color:#fff;border:none}
+.toolbar .btn-restart{background:#b7950b;color:#fff;border:none}
 .toolbar .refresh-info{font-size:.75rem;color:var(--muted);margin-left:auto}
 
 .stats-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:16px 24px}
@@ -94,7 +96,9 @@ table.data-table tr:hover{background:var(--surface)}
 
 <div class="toolbar">
   <button onclick="forceScan()">Принуд. скан</button>
-  <button class="btn-secondary" onclick="loadAll()">Обновить</button>
+  <button class="btn-secondary" onclick="loadAll()">Обновить данные</button>
+  <button class="btn-update" onclick="gitUpdate()">Обновить код</button>
+  <button class="btn-restart" onclick="restartServices()">Перезапуск</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
     <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто (30с)
   </label>
@@ -575,6 +579,27 @@ async function manualClose(ticker) {
     const j = await r.json();
     alert(j.message || 'OK');
     setTimeout(loadAll, 2000);
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+/* ═══ GIT UPDATE & RESTART ═══ */
+async function gitUpdate() {
+  if (!confirm('Обновить код с GitHub? (git pull)')) return;
+  try {
+    const r = await fetch(API + '/api/update', { method: 'POST' });
+    const j = await r.json();
+    alert(j.message || 'Готово');
+    if (j.ok) setTimeout(() => location.reload(), 1500);
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
+async function restartServices() {
+  if (!confirm('Перезапустить сервисы робота?')) return;
+  try {
+    const r = await fetch(API + '/api/restart', { method: 'POST' });
+    const j = await r.json();
+    alert(j.message || 'Перезапуск...');
+    setTimeout(() => location.reload(), 3000);
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
 
