@@ -5,10 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MOEX Screener — Insides Without Inside</title>
 <style>
-:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a}
+:root{--bg:#ffffff;--surface:#f0f4f8;--card:#e8eef5;--accent:#0039A6;--green:#1e8449;--red:#D52B1E;--text:#1a1a2e;--muted:#5d6d7e;--border:#c8d6e5}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh}
 a{color:var(--accent);text-decoration:none}
+::selection{background:var(--accent);color:#fff}
 
 header{background:var(--surface);padding:18px 24px;border-bottom:2px solid var(--accent)}
 header h1{font-size:1.6rem;font-weight:700;letter-spacing:1px}
@@ -18,12 +19,12 @@ header .subtitle{color:var(--muted);font-size:.85rem;margin-top:2px}
 .toolbar button{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.9rem;font-weight:600;transition:opacity .2s}
 .toolbar button:hover{opacity:.85}
 .toolbar button:disabled{opacity:.4;cursor:not-allowed}
-.toolbar .btn-secondary{background:var(--border);color:var(--text)}
+.toolbar .btn-secondary{background:var(--border);color:var(--text);border:1px solid #b0bec5}
 .toolbar label{display:flex;align-items:center;gap:5px;font-size:.85rem;color:var(--muted);cursor:pointer}
 .toolbar label input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px}
 .toolbar .status-pill{padding:4px 12px;border-radius:12px;font-size:.8rem;font-weight:600}
-.toolbar .status-open{background:#00b89433;color:var(--green);border:1px solid var(--green)}
-.toolbar .status-closed{background:#e1705533;color:var(--red);border:1px solid var(--red)}
+.toolbar .status-open{background:#1e844922;color:var(--green);border:1px solid var(--green)}
+.toolbar .status-closed{background:#D52B1E22;color:var(--red);border:1px solid var(--red)}
 .toolbar .cache-info{font-size:.78rem;color:var(--muted);margin-left:auto}
 
 .filter-bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 24px;background:var(--bg);border-bottom:1px solid var(--border)}
@@ -50,26 +51,26 @@ header .subtitle{color:var(--muted);font-size:.85rem;margin-top:2px}
 .card-ticker{font-size:1.3rem;font-weight:700;letter-spacing:.5px}
 .card-name{font-size:.8rem;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tier-badge{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
-.tier-ULTRA{background:#9b59b644;color:#c39bd3;border:1px solid #9b59b6}
-.tier-STRONG{background:#3498db44;color:#85c1e9;border:1px solid #3498db}
-.tier-BASE{background:#7f8c8d44;color:#bdc3c7;border:1px solid #7f8c8d}
+.tier-ULTRA{background:#8e44ad22;color:#7d3c98;border:1px solid #8e44ad}
+.tier-STRONG{background:#0039A622;color:#0039A6;border:1px solid #0039A6}
+.tier-BASE{background:#7f8c8d22;color:#566573;border:1px solid #95a5a6}
 .strat-badge{padding:2px 8px;border-radius:8px;font-size:.7rem;font-weight:600;background:var(--surface);color:var(--muted);border:1px solid var(--border)}
 
 .card-body{display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;font-size:.82rem;margin-bottom:10px}
 .card-body .lbl{color:var(--muted)}
 .card-body .val{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
-.val-vr{color:#f1c40f;font-size:.95rem}
+.val-vr{color:#b7950b;font-size:.95rem}
 .val-green{color:var(--green)}
 .val-red{color:var(--red)}
 
 .card-foot{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding-top:8px;border-top:1px solid var(--border)}
 .freshness{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:600}
-.fresh-today{background:#00b89433;color:var(--green)}
-.fresh-yesterday{background:#f39c1233;color:#f1c40f}
-.fresh-old{background:#7f8c8d33;color:#bdc3c7}
+.fresh-today{background:#1e844922;color:var(--green)}
+.fresh-yesterday{background:#d4ac0d22;color:#b7950b}
+.fresh-old{background:#7f8c8d22;color:#7f8c8d}
 .t1-status{padding:2px 10px;border-radius:10px;font-size:.72rem;font-weight:600}
-.t1-confirmed{background:#00b89433;color:var(--green)}
-.t1-pending{background:#e67e2233;color:#f0932b}
+.t1-confirmed{background:#1e844922;color:var(--green)}
+.t1-pending{background:#e67e2222;color:#ca6f1e}
 
 .empty-state{text-align:center;padding:60px 24px;color:var(--muted);font-size:1rem}
 
@@ -994,16 +995,16 @@ function renderSignals(){
       <div class="card-body">
         <span class="lbl">VR</span><span class="val val-vr">${fmtNum(s.vr,1)}x</span>
         <span class="lbl">ATR%</span><span class="val">${fmtNum(s.atr)}%</span>
-        <span class="lbl">Close Pos</span><span class="val">${fmtNum(s.cp)}</span>
-        <span class="lbl">Day Ret</span><span class="val">${fmtNum(s.dayRet)}%</span>
-        <span class="lbl">Entry Price (EP)</span><span class="val">${fmtPrice(s.entryPrice)}</span>
-        <span class="lbl">Cat Stop</span><span class="val val-red">${fmtPrice(s.catStop)}</span>
+        <span class="lbl">Закр. позиция</span><span class="val">${fmtNum(s.cp)}</span>
+        <span class="lbl">Дн. доход</span><span class="val">${fmtNum(s.dayRet)}%</span>
+        <span class="lbl">Цена входа</span><span class="val">${fmtPrice(s.entryPrice)}</span>
+        <span class="lbl">Кат. стоп</span><span class="val val-red">${fmtPrice(s.catStop)}</span>
         <span class="lbl">TS после дня</span><span class="val">${s.tier.tsAfter}</span>
         <span class="lbl">TS дист%</span><span class="val">${fmtNum(s.tier.tsDist,1)}%</span>
-        <span class="lbl">Gap Cancel ></span><span class="val">${fmtPrice(s.gapThreshold)}</span>
+        <span class="lbl">Отмена гэпа ></span><span class="val">${fmtPrice(s.gapThreshold)}</span>
         <span class="lbl">Оборот (ср.)</span><span class="val">${fmtMln(s.avgTurnover)}</span>
         <span class="lbl">MA50</span><span class="val">${fmtPrice(s.ma50)}</span>
-        <span class="lbl">Max Hold</span><span class="val">${s.tier.maxHold} дн.</span>
+        <span class="lbl">Макс. удерж.</span><span class="val">${s.tier.maxHold} дн.</span>
         <span class="lbl">Дата сигнала</span><span class="val">${s.date}</span>
         <span class="lbl">Закрытие</span><span class="val">${fmtPrice(s.close)}</span>
       </div>
@@ -1055,10 +1056,10 @@ function renderPortfolio(){
     <div class="port-stat"><div class="stat-label">Доходность</div><div class="stat-val" style="color:${parseFloat(totalRet)>=0?'var(--green)':'var(--red)'}">${totalRet}%</div></div>
     <div class="port-stat"><div class="stat-label">Сделок</div><div class="stat-val">${closed.length}</div></div>
     <div class="port-stat"><div class="stat-label">Открыто</div><div class="stat-val">${open.length}</div></div>
-    <div class="port-stat"><div class="stat-label">Win Rate</div><div class="stat-val">${wr}%</div></div>
-    <div class="port-stat"><div class="stat-label">Avg Ret</div><div class="stat-val">${avgRet}%</div></div>
-    <div class="port-stat"><div class="stat-label">PF</div><div class="stat-val">${pf}</div></div>
-    <div class="port-stat"><div class="stat-label">Max DD</div><div class="stat-val" style="color:var(--red)">${maxDD}%</div></div>
+    <div class="port-stat"><div class="stat-label">Доля побед</div><div class="stat-val">${wr}%</div></div>
+    <div class="port-stat"><div class="stat-label">Ср. доход</div><div class="stat-val">${avgRet}%</div></div>
+    <div class="port-stat"><div class="stat-label">Профит-фактор</div><div class="stat-val">${pf}</div></div>
+    <div class="port-stat"><div class="stat-label">Макс. просадка</div><div class="stat-val" style="color:var(--red)">${maxDD}%</div></div>
   `;
 
   // Open positions
@@ -1112,7 +1113,7 @@ function drawEquity(equity){
   ctx.scale(dpr,dpr);
   const W=rect.width, H=200;
 
-  ctx.fillStyle='#16213e';
+  ctx.fillStyle='#f0f4f8';
   ctx.fillRect(0,0,W,H);
 
   if(equity.length<2) return;
@@ -1123,18 +1124,18 @@ function drawEquity(equity){
   const range=maxV-minV||1;
 
   // Grid lines
-  ctx.strokeStyle='#2a2a4a';
+  ctx.strokeStyle='#c8d6e5';
   ctx.lineWidth=0.5;
   for(let i=0;i<5;i++){
     const y=H*0.05+i*(H*0.9/4);
     ctx.beginPath();ctx.moveTo(40,y);ctx.lineTo(W-10,y);ctx.stroke();
     const val=maxV-(i/4)*range;
-    ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='right';
+    ctx.fillStyle='#5d6d7e';ctx.font='10px sans-serif';ctx.textAlign='right';
     ctx.fillText(val.toFixed(0)+'%',36,y+3);
   }
 
   // Equity line
-  ctx.strokeStyle='#e94560';
+  ctx.strokeStyle='#0039A6';
   ctx.lineWidth=1.5;
   ctx.beginPath();
   for(let i=0;i<equity.length;i++){
@@ -1147,13 +1148,13 @@ function drawEquity(equity){
   // 100% baseline
   if(100>=minV&&100<=maxV){
     const y100=H*0.05+(1-(100-minV)/range)*(H*0.9);
-    ctx.strokeStyle='#ffffff44';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+    ctx.strokeStyle='#0039A644';ctx.lineWidth=1;ctx.setLineDash([4,4]);
     ctx.beginPath();ctx.moveTo(40,y100);ctx.lineTo(W-10,y100);ctx.stroke();
     ctx.setLineDash([]);
   }
 
   // Date labels
-  ctx.fillStyle='#999';ctx.font='10px sans-serif';ctx.textAlign='center';
+  ctx.fillStyle='#5d6d7e';ctx.font='10px sans-serif';ctx.textAlign='center';
   const step=Math.max(1,Math.floor(equity.length/6));
   for(let i=0;i<equity.length;i+=step){
     const x=40+(W-50)*i/(equity.length-1);

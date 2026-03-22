@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Trading Panel — Insides Without Inside</title>
+<title>Панель робота — Insides Without Inside</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
-:root{--bg:#1a1a2e;--surface:#16213e;--card:#0f3460;--accent:#e94560;--green:#00b894;--red:#e17055;--text:#eee;--muted:#999;--border:#2a2a4a;--yellow:#f1c40f}
+:root{--bg:#ffffff;--surface:#f0f4f8;--card:#e8eef5;--accent:#0039A6;--green:#1e8449;--red:#D52B1E;--text:#1a1a2e;--muted:#5d6d7e;--border:#c8d6e5;--yellow:#b7950b}
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh}
 
@@ -15,14 +15,14 @@ header h1{font-size:1.5rem;font-weight:700;letter-spacing:1px}
 header .subtitle{color:var(--muted);font-size:.82rem}
 .header-right{display:flex;align-items:center;gap:12px}
 .mode-pill{padding:4px 14px;border-radius:12px;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
-.mode-live{background:#e9456033;color:var(--accent);border:1px solid var(--accent)}
-.mode-dry{background:#f1c40f33;color:var(--yellow);border:1px solid var(--yellow)}
+.mode-live{background:#D52B1E22;color:var(--red);border:1px solid var(--red)}
+.mode-dry{background:#b7950b22;color:var(--yellow);border:1px solid var(--yellow)}
 .last-run{font-size:.78rem;color:var(--muted)}
 
 .toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:10px 24px;background:var(--surface);border-bottom:1px solid var(--border)}
 .toolbar button{background:var(--accent);color:#fff;border:none;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:opacity .2s}
 .toolbar button:hover{opacity:.85}
-.toolbar .btn-secondary{background:var(--border);color:var(--text)}
+.toolbar .btn-secondary{background:var(--border);color:var(--text);border:1px solid #b0bec5}
 .toolbar .refresh-info{font-size:.75rem;color:var(--muted);margin-left:auto}
 
 .stats-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;padding:16px 24px}
@@ -51,9 +51,9 @@ table.data-table tr:hover{background:var(--surface)}
 .ret-neg{color:var(--red);font-weight:600}
 
 .tier-badge{padding:2px 8px;border-radius:8px;font-size:.72rem;font-weight:700;text-transform:uppercase}
-.tier-ULTRA{background:#9b59b644;color:#c39bd3;border:1px solid #9b59b6}
-.tier-STRONG{background:#3498db44;color:#85c1e9;border:1px solid #3498db}
-.tier-BASE{background:#7f8c8d44;color:#bdc3c7;border:1px solid #7f8c8d}
+.tier-ULTRA{background:#8e44ad22;color:#7d3c98;border:1px solid #8e44ad}
+.tier-STRONG{background:#0039A622;color:#0039A6;border:1px solid #0039A6}
+.tier-BASE{background:#7f8c8d22;color:#566573;border:1px solid #95a5a6}
 
 .btn-close{background:var(--red);color:#fff;border:none;padding:3px 10px;border-radius:5px;cursor:pointer;font-size:.75rem;font-weight:600}
 .btn-close:hover{opacity:.8}
@@ -61,7 +61,7 @@ table.data-table tr:hover{background:var(--surface)}
 .signals-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
 .signal-pill{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:4px 12px;font-size:.78rem;color:var(--muted)}
 
-.logs-box{background:#0a0a1a;border:1px solid var(--border);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:.75rem;line-height:1.6;color:var(--muted)}
+.logs-box{background:#f7f9fc;border:1px solid var(--border);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-family:'Cascadia Code','Fira Code',monospace;font-size:.75rem;line-height:1.6;color:var(--muted)}
 .logs-box .log-line{white-space:pre-wrap;word-break:break-all}
 .logs-box .log-line:hover{color:var(--text)}
 
@@ -69,7 +69,7 @@ table.data-table tr:hover{background:var(--surface)}
 
 .empty-msg{text-align:center;padding:30px;color:var(--muted);font-size:.9rem}
 
-.error-banner{background:#e9456033;border:1px solid var(--accent);border-radius:8px;padding:12px 20px;margin:10px 24px;color:var(--accent);font-size:.85rem;display:none}
+.error-banner{background:#D52B1E18;border:1px solid var(--red);border-radius:8px;padding:12px 20px;margin:10px 24px;color:var(--red);font-size:.85rem;display:none}
 
 @media(max-width:900px){
   .two-col{grid-template-columns:1fr}
@@ -83,17 +83,17 @@ table.data-table tr:hover{background:var(--surface)}
 
 <header>
   <div>
-    <h1>Trading Panel</h1>
-    <div class="subtitle">Insides Without Inside — Панель управления роботом</div>
+    <h1>Панель робота</h1>
+    <div class="subtitle">Insides Without Inside — Управление торговым роботом</div>
   </div>
   <div class="header-right">
-    <span id="modePill" class="mode-pill mode-dry">DRY RUN</span>
+    <span id="modePill" class="mode-pill mode-dry">ТЕСТ</span>
     <span id="lastRun" class="last-run"></span>
   </div>
 </header>
 
 <div class="toolbar">
-  <button onclick="forceScan()">Force Scan</button>
+  <button onclick="forceScan()">Принуд. скан</button>
   <button class="btn-secondary" onclick="loadAll()">Обновить</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
     <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто (30с)
@@ -257,8 +257,8 @@ function renderStatus() {
 
   // Mode pill
   const pill = document.getElementById('modePill');
-  if (s.mode === 'live') { pill.textContent = 'LIVE'; pill.className = 'mode-pill mode-live'; }
-  else { pill.textContent = 'DRY RUN'; pill.className = 'mode-pill mode-dry'; }
+  if (s.mode === 'live') { pill.textContent = 'БОЕВОЙ'; pill.className = 'mode-pill mode-live'; }
+  else { pill.textContent = 'ТЕСТ'; pill.className = 'mode-pill mode-dry'; }
 
   // Last run
   document.getElementById('lastRun').textContent = s.lastRunAt
@@ -312,8 +312,8 @@ function renderEquity() {
       datasets: [{
         label: 'Капитал (₽)',
         data,
-        borderColor: '#e94560',
-        backgroundColor: '#e9456022',
+        borderColor: '#0039A6',
+        backgroundColor: '#0039A618',
         fill: true,
         tension: 0.3,
         pointRadius: data.length > 100 ? 0 : 2,
@@ -328,8 +328,8 @@ function renderEquity() {
         tooltip: { callbacks: { label: ctx => fmtRub(ctx.raw) } },
       },
       scales: {
-        x: { ticks: { color: '#999', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#2a2a4a' } },
-        y: { ticks: { color: '#999', callback: v => (v/1000).toFixed(0)+'k' }, grid: { color: '#2a2a4a' } },
+        x: { ticks: { color: '#5d6d7e', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#c8d6e5' } },
+        y: { ticks: { color: '#5d6d7e', callback: v => (v/1000).toFixed(0)+'k' }, grid: { color: '#c8d6e5' } },
       },
       interaction: { intersect: false, mode: 'index' },
     }
@@ -355,8 +355,8 @@ function renderDrawdown() {
       datasets: [{
         label: 'Просадка %',
         data: dd,
-        borderColor: '#e17055',
-        backgroundColor: '#e1705533',
+        borderColor: '#D52B1E',
+        backgroundColor: '#D52B1E22',
         fill: true,
         tension: 0.3,
         pointRadius: dd.length > 100 ? 0 : 2,
@@ -371,8 +371,8 @@ function renderDrawdown() {
         tooltip: { callbacks: { label: ctx => ctx.raw.toFixed(2) + '%' } },
       },
       scales: {
-        x: { ticks: { color: '#999', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#2a2a4a' } },
-        y: { ticks: { color: '#999', callback: v => v.toFixed(1)+'%' }, grid: { color: '#2a2a4a' },
+        x: { ticks: { color: '#5d6d7e', maxTicksLimit: 10, maxRotation: 0 }, grid: { color: '#c8d6e5' } },
+        y: { ticks: { color: '#5d6d7e', callback: v => v.toFixed(1)+'%' }, grid: { color: '#c8d6e5' },
              max: 0 },
       },
       interaction: { intersect: false, mode: 'index' },
@@ -418,9 +418,9 @@ function renderSummary() {
 
   const items = [
     { label: 'Всего сделок', val: closed.length, color: '' },
-    { label: 'Win Rate', val: wr.toFixed(1) + '%', color: wr >= 50 ? 'var(--green)' : 'var(--red)' },
-    { label: 'Средн. доход', val: fmtPct(avgRet, 2), color: avgRet >= 0 ? 'var(--green)' : 'var(--red)' },
-    { label: 'Profit Factor', val: pf === Infinity ? '∞' : pf.toFixed(2), color: pf >= 1 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Доля побед', val: wr.toFixed(1) + '%', color: wr >= 50 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Ср. доход', val: fmtPct(avgRet, 2), color: avgRet >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label: 'Профит-фактор', val: pf === Infinity ? '∞' : pf.toFixed(2), color: pf >= 1 ? 'var(--green)' : 'var(--red)' },
     { label: 'Лучшая', val: fmtPct(best, 2), color: 'var(--green)' },
     { label: 'Худшая', val: fmtPct(worst, 2), color: 'var(--red)' },
     { label: 'Средн. длит.', val: avgDur.toFixed(1) + ' дн.', color: '' },
@@ -472,7 +472,7 @@ function renderTradePnl() {
   const last = trades.slice(-60);
   const labels = last.map(t => t.ticker + ' ' + fmtDate(t.exitDate));
   const data = last.map(t => t.ret);
-  const colors = data.map(v => v >= 0 ? '#00b894' : '#e17055');
+  const colors = data.map(v => v >= 0 ? '#1e8449' : '#D52B1E');
 
   if (chartTradePnl) chartTradePnl.destroy();
   chartTradePnl = new Chart(document.getElementById('tradePnlChart'), {
@@ -494,8 +494,8 @@ function renderTradePnl() {
         tooltip: { callbacks: { label: ctx => fmtPct(ctx.raw, 2) } },
       },
       scales: {
-        x: { ticks: { color: '#999', maxRotation: 45, font: { size: 9 } }, grid: { display: false } },
-        y: { ticks: { color: '#999', callback: v => v.toFixed(0)+'%' }, grid: { color: '#2a2a4a' } },
+        x: { ticks: { color: '#5d6d7e', maxRotation: 45, font: { size: 9 } }, grid: { display: false } },
+        y: { ticks: { color: '#5d6d7e', callback: v => v.toFixed(0)+'%' }, grid: { color: '#c8d6e5' } },
       },
     }
   });
@@ -563,7 +563,7 @@ async function forceScan() {
   try {
     const r = await fetch(API + '/api/force-scan', { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'Scan triggered');
+    alert(j.message || 'Скан запущен');
     setTimeout(loadAll, 3000);
   } catch (e) { alert('Ошибка: ' + e.message); }
 }
