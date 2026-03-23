@@ -13,7 +13,7 @@
 //   POST /api/force-scan    — trigger a cycle
 
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -23,10 +23,34 @@ import { P } from './signals.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = join(__dirname, '..');
 const LOG_FILE = join(__dirname, 'robot.log');
+const MODE_FILE = join(__dirname, 'mode.json');
 let INDEX_HTML = '';
 try { INDEX_HTML = readFileSync(join(__dirname, 'index.html'), 'utf8'); } catch {}
 
 let _forceScanCallback = null;
+let _lastCycleAt = null;
+let _cycleIntervalMs = 10 * 60_000; // 10 min
+
+/** Save mode to disk so it survives restarts. */
+function persistMode(live) {
+  try { writeFileSync(MODE_FILE, JSON.stringify({ live, savedAt: new Date().toISOString() })); } catch {}
+}
+
+/** Load persisted mode from disk. Returns null if not found. */
+export function loadPersistedMode() {
+  try {
+    if (existsSync(MODE_FILE)) {
+      const { live } = JSON.parse(readFileSync(MODE_FILE, 'utf8'));
+      return typeof live === 'boolean' ? live : null;
+    }
+  } catch {}
+  return null;
+}
+
+/** Called by robot after each cycle completes. */
+export function markCycleCompleted() {
+  _lastCycleAt = Date.now();
+}
 
 /**
  * Register a callback for force-scan POST requests.
@@ -109,6 +133,17 @@ export function startPanel(port, modeRef, log) {
           });
         }
 
+        if (path === '/api/cycle-timer') {
+          const nextIn = _lastCycleAt
+            ? Math.max(0, _cycleIntervalMs - (Date.now() - _lastCycleAt))
+            : null;
+          return json(res, {
+            lastCycleAt: _lastCycleAt ? new Date(_lastCycleAt).toISOString() : null,
+            intervalMs: _cycleIntervalMs,
+            nextInMs: nextIn,
+          });
+        }
+
         if (path === '/api/logs') {
           try {
             const raw = readFileSync(LOG_FILE, 'utf8');
@@ -149,13 +184,14 @@ export function startPanel(port, modeRef, log) {
           return json(res, { ok: false, message: 'No scan callback registered' });
         }
 
-        // POST /api/mode — toggle dry_run / live
+        // POST /api/mode — toggle dry_run / live (persisted to disk)
         if (path === '/api/mode') {
           const body = await readBody(req);
           const { live } = JSON.parse(body);
           if (typeof modeRef === 'object' && modeRef.set) {
             modeRef.set(!live);
-            log(`PANEL: mode changed to ${live ? 'LIVE' : 'DRY_RUN'}`);
+            persistMode(live);
+            log(`PANEL: mode changed to ${live ? 'LIVE' : 'DRY_RUN'} (persisted)`);
             return json(res, { ok: true, mode: live ? 'live' : 'dry_run' });
           }
           return json(res, { ok: false, message: 'Mode toggle not supported in this configuration' });

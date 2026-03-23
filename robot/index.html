@@ -74,6 +74,39 @@ table.data-table tr:hover{background:var(--surface)}
 
 .error-banner{background:#D52B1E18;border:1px solid var(--red);border-radius:8px;padding:12px 20px;margin:10px 24px;color:var(--red);font-size:.85rem;display:none}
 
+/* Toast notifications */
+.toast-container{position:fixed;top:20px;right:20px;z-index:10000;display:flex;flex-direction:column;gap:8px}
+.toast{padding:12px 20px;border-radius:8px;font-size:.85rem;font-weight:600;color:#fff;box-shadow:0 4px 12px rgba(0,0,0,.15);animation:toastIn .3s ease,toastOut .3s ease 3.7s;opacity:0;animation-fill-mode:forwards;max-width:360px}
+.toast-success{background:#1e8449}
+.toast-error{background:#D52B1E}
+.toast-info{background:#0039A6}
+@keyframes toastIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+@keyframes toastOut{from{opacity:1}to{opacity:0}}
+
+/* Custom modal */
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:9000;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s;pointer-events:none}
+.modal-overlay.active{opacity:1;pointer-events:auto}
+.modal-box{background:#fff;border-radius:12px;padding:28px 32px;max-width:440px;width:90%;box-shadow:0 12px 40px rgba(0,0,0,.25);transform:scale(.9);transition:transform .2s}
+.modal-overlay.active .modal-box{transform:scale(1)}
+.modal-title{font-size:1.1rem;font-weight:700;margin-bottom:12px}
+.modal-body{font-size:.9rem;color:var(--muted);line-height:1.5;margin-bottom:20px}
+.modal-warn{color:var(--red);font-weight:700;font-size:.95rem;margin-bottom:8px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end}
+.modal-actions button{padding:10px 24px;border-radius:8px;font-size:.88rem;font-weight:600;cursor:pointer;border:none;transition:opacity .2s}
+.modal-actions button:hover{opacity:.85}
+.modal-btn-confirm{background:var(--accent);color:#fff}
+.modal-btn-danger{background:var(--red);color:#fff}
+.modal-btn-cancel{background:var(--border);color:var(--text)}
+
+/* Connection indicator */
+.conn-indicator{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;transition:background .3s}
+.conn-ok{background:#1e8449}
+.conn-err{background:#D52B1E;animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* Cycle timer */
+.cycle-timer{font-size:.75rem;color:var(--muted);display:flex;align-items:center;gap:4px}
+
 @media(max-width:900px){
   .two-col{grid-template-columns:1fr}
   .stats-row{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
@@ -84,12 +117,23 @@ table.data-table tr:hover{background:var(--surface)}
 </head>
 <body>
 
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal-box">
+    <div class="modal-title" id="modalTitle"></div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-actions" id="modalActions"></div>
+  </div>
+</div>
+
 <header>
   <div>
     <h1>Панель робота</h1>
     <div class="subtitle">Insides Without Inside — Управление торговым роботом</div>
   </div>
   <div class="header-right">
+    <span class="conn-indicator conn-ok" id="connIndicator" title="Связь с сервером"></span>
     <span id="modePill" class="mode-pill mode-dry" onclick="toggleMode()" title="Нажмите для переключения режима">ТЕСТ</span>
     <span id="lastRun" class="last-run"></span>
   </div>
@@ -101,8 +145,15 @@ table.data-table tr:hover{background:var(--surface)}
   <button class="btn-update" onclick="gitUpdate()">Обновить код</button>
   <button class="btn-restart" onclick="restartServices()">Перезапуск</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
-    <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто (30с)
+    <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто
+    <select id="autoInterval" onchange="toggleAuto()" style="font-size:.78rem;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--surface)">
+      <option value="10000">10с</option>
+      <option value="30000" selected>30с</option>
+      <option value="60000">60с</option>
+      <option value="300000">5мин</option>
+    </select>
   </label>
+  <div class="cycle-timer" id="cycleTimer"></div>
   <div class="refresh-info" id="refreshInfo"></div>
 </div>
 
@@ -210,8 +261,47 @@ function pnlClass(v) { return v >= 0 ? 'ret-pos' : 'ret-neg'; }
 
 /* ═══ STATE ═══ */
 let autoTimer = null;
+let cycleTimerInterval = null;
 let chartEquity = null, chartDrawdown = null, chartTradePnl = null;
 let cachedData = { status: null, positions: [], history: [], curve: [], signals: {}, config: null, logs: [] };
+let connectionOk = true;
+
+/* ═══ TOAST NOTIFICATIONS ═══ */
+function toast(msg, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast toast-' + type;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+/* ═══ CUSTOM MODAL ═══ */
+function showModal(title, body, buttons) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('modalOverlay');
+    document.getElementById('modalTitle').innerHTML = title;
+    document.getElementById('modalBody').innerHTML = body;
+    const actions = document.getElementById('modalActions');
+    actions.innerHTML = '';
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      btn.textContent = b.label;
+      btn.className = b.className || 'modal-btn-cancel';
+      btn.onclick = () => { overlay.classList.remove('active'); resolve(b.value); };
+      actions.appendChild(btn);
+    });
+    overlay.classList.add('active');
+  });
+}
+
+/* ═══ CONNECTION INDICATOR ═══ */
+function setConnectionStatus(ok) {
+  const ind = document.getElementById('connIndicator');
+  if (ok) { ind.className = 'conn-indicator conn-ok'; ind.title = 'Сервер доступен'; }
+  else { ind.className = 'conn-indicator conn-err'; ind.title = 'Нет связи с сервером'; }
+  connectionOk = ok;
+}
 
 /* ═══ API ═══ */
 const API = '';
@@ -231,9 +321,11 @@ async function loadAll() {
     ]);
     cachedData = { status, positions, history, curve, signals, config, logs };
     hideError();
+    setConnectionStatus(true);
     renderAll();
   } catch (e) {
     showError('Ошибка загрузки: ' + e.message);
+    setConnectionStatus(false);
   }
   if (btn) { btn.textContent = 'Обновить данные'; btn.disabled = false; }
   document.getElementById('refreshInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
@@ -571,10 +663,21 @@ async function toggleMode() {
   if (!s) return;
   const isCurrentlyDry = s.mode !== 'live';
   const targetLive = isCurrentlyDry;
-  const msg = targetLive
-    ? '⚠️ ВНИМАНИЕ!\n\nВы переключаете робота в БОЕВОЙ режим.\nОн начнёт отправлять РЕАЛЬНЫЕ ордера на биржу.\n\nПродолжить?'
-    : 'Переключить робота в ТЕСТОВЫЙ режим?\nОрдера отправляться НЕ будут.';
-  if (!confirm(msg)) return;
+
+  const title = targetLive ? '⚠️ Переключение в БОЕВОЙ режим' : 'Переключение в ТЕСТОВЫЙ режим';
+  const body = targetLive
+    ? '<div class="modal-warn">ВНИМАНИЕ!</div>Робот начнёт отправлять <b>РЕАЛЬНЫЕ ордера</b> на биржу.<br>Вы уверены?'
+    : 'Робот перестанет отправлять ордера.<br>Все действия будут только симулироваться.';
+  const confirmBtn = targetLive
+    ? { label: 'Да, включить БОЕВОЙ', className: 'modal-btn-danger', value: true }
+    : { label: 'Да, включить ТЕСТ', className: 'modal-btn-confirm', value: true };
+
+  const result = await showModal(title, body, [
+    confirmBtn,
+    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
+  ]);
+  if (!result) return;
+
   try {
     const r = await fetch(API + '/api/mode', {
       method: 'POST',
@@ -583,12 +686,12 @@ async function toggleMode() {
     });
     const j = await r.json();
     if (j.ok) {
-      alert(targetLive ? 'Режим: БОЕВОЙ' : 'Режим: ТЕСТ');
+      toast(targetLive ? 'Режим: БОЕВОЙ' : 'Режим: ТЕСТ', targetLive ? 'error' : 'success');
       loadAll();
     } else {
-      alert('Ошибка: ' + (j.message || 'unknown'));
+      toast('Ошибка: ' + (j.message || 'unknown'), 'error');
     }
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 async function forceScan() {
@@ -599,60 +702,91 @@ async function forceScan() {
     const j = await r.json();
     if (j.ok) {
       if (btn) btn.textContent = 'Скан запущен!';
+      toast('Скан запущен', 'success');
       setTimeout(loadAll, 5000);
       setTimeout(() => { if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; } }, 60000);
     } else {
-      alert(j.message || 'Ошибка');
+      toast(j.message || 'Ошибка', 'error');
       if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
     }
   } catch (e) {
-    alert('Ошибка: ' + e.message);
+    toast('Ошибка: ' + e.message, 'error');
     if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
   }
 }
 
 async function manualClose(ticker) {
-  if (!confirm(`Закрыть позицию ${ticker}?`)) return;
+  const ok = await showModal('Закрытие позиции', `Закрыть позицию <b>${ticker}</b>?<br>Ордер будет отправлен в следующем цикле.`, [
+    { label: 'Закрыть', className: 'modal-btn-danger', value: true },
+    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
+  ]);
+  if (!ok) return;
   try {
     const r = await fetch(API + `/api/close/${ticker}`, { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'OK');
+    toast(j.message || 'OK', 'success');
     setTimeout(loadAll, 2000);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 /* ═══ GIT UPDATE & RESTART ═══ */
 async function gitUpdate() {
-  if (!confirm('Обновить код с GitHub? (git pull)')) return;
+  const ok = await showModal('Обновление кода', 'Выполнить <b>git pull</b> с GitHub?<br>После обновления страница перезагрузится.', [
+    { label: 'Обновить', className: 'modal-btn-confirm', value: true },
+    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
+  ]);
+  if (!ok) return;
   try {
     const r = await fetch(API + '/api/update', { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'Готово');
+    toast(j.message || 'Готово', j.ok ? 'success' : 'error');
     if (j.ok) setTimeout(() => location.reload(), 1500);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 async function restartServices() {
-  if (!confirm('Перезапустить сервисы робота?')) return;
+  const ok = await showModal('Перезапуск сервисов', 'Перезапустить <b>moex-panel</b> и <b>moex-robot</b>?<br>Режим (ТЕСТ/БОЕВОЙ) сохранится.', [
+    { label: 'Перезапустить', className: 'modal-btn-danger', value: true },
+    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
+  ]);
+  if (!ok) return;
   try {
     const r = await fetch(API + '/api/restart', { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'Перезапуск...');
+    toast(j.message || 'Перезапуск...', 'info');
     setTimeout(() => location.reload(), 3000);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 /* ═══ AUTO-REFRESH ═══ */
 function toggleAuto() {
   if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
   if (document.getElementById('chkAuto').checked) {
-    autoTimer = setInterval(loadAll, 30000);
+    const ms = parseInt(document.getElementById('autoInterval').value, 10);
+    autoTimer = setInterval(loadAll, ms);
   }
+}
+
+/* ═══ CYCLE TIMER ═══ */
+async function updateCycleTimer() {
+  try {
+    const data = await api('/api/cycle-timer');
+    const el = document.getElementById('cycleTimer');
+    if (data.nextInMs != null) {
+      const mins = Math.floor(data.nextInMs / 60000);
+      const secs = Math.floor((data.nextInMs % 60000) / 1000);
+      el.innerHTML = `⏱ Скан через <b>${mins}:${String(secs).padStart(2,'0')}</b>`;
+    } else {
+      el.textContent = '⏱ Ожидание первого скана...';
+    }
+  } catch { /* ignore */ }
 }
 
 /* ═══ INIT ═══ */
 loadAll();
 toggleAuto();
+updateCycleTimer();
+cycleTimerInterval = setInterval(updateCycleTimer, 5000);
 </script>
 </body>
 </html>
