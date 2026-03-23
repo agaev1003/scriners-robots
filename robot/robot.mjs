@@ -4,7 +4,7 @@
 // Imports all modules, runs one cycle: reconcile → manage → entry → save.
 // Web panel runs separately via panel.js (or inline if PORT is set).
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -13,14 +13,23 @@ import { P, BLACKLIST, scanTicker } from './signals.js';
 import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint } from './state.js';
 import { updatePositionFromCandles, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
-import { startPanel } from './panel.js';
+import { startPanel, onForceScan } from './panel.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+/* ═══ LOAD .env (if present) ═══ */
+try {
+  const envText = readFileSync(join(__dirname, '.env'), 'utf8');
+  for (const line of envText.split('\n')) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+} catch {}
+
 /* ═══ CONFIG (from env) ═══ */
 const TOKEN   = process.env.TKF_TOKEN;
-const ACCOUNT = process.env.TKF_ACCOUNT_ID;
-const DRY_RUN = process.env.DRY_RUN !== 'false';
+let   ACCOUNT = process.env.TKF_ACCOUNT_ID;
+let   DRY_RUN = process.env.DRY_RUN !== 'false';
 const PORT    = parseInt(process.env.PORT || '0', 10);
 
 const MIN_BARS  = 150;
@@ -321,8 +330,20 @@ async function updateCurve(state, instrMap) {
 export async function runCycle() {
   log('═══ Cycle start ═══');
   if (!TOKEN) { log('ERROR: TKF_TOKEN not set'); return; }
-  if (!ACCOUNT) log('WARN: TKF_ACCOUNT_ID not set');
   if (DRY_RUN) log('MODE: DRY_RUN');
+
+  // Auto-discover account ID if not set
+  if (!ACCOUNT) {
+    try {
+      const accounts = await tkf.getAccounts(TOKEN);
+      if (accounts.length) {
+        ACCOUNT = accounts[0].id;
+        log(`Auto-discovered ACCOUNT: ${ACCOUNT}`);
+      } else {
+        log('WARN: no accounts found');
+      }
+    } catch (e) { log(`WARN: account discovery failed: ${e.message}`); }
+  }
 
   const state = loadState();
 
@@ -366,5 +387,35 @@ export async function runCycle() {
 process.on('SIGINT', () => { log('SIGINT'); process.exit(0); });
 process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0); });
 
-if (PORT) startPanel(PORT, DRY_RUN, log);
-runCycle().catch(e => { log(`FATAL: ${e.message}`); process.exit(1); });
+let cycleRunning = false;
+
+async function safeCycle() {
+  if (cycleRunning) { log('Cycle already running, skip'); return; }
+  cycleRunning = true;
+  try { await runCycle(); }
+  catch (e) { log(`CYCLE ERROR: ${e.message}`); }
+  finally { cycleRunning = false; }
+}
+
+if (PORT) {
+  // Persistent mode: panel + scheduled cycles
+  startPanel(PORT, { get() { return DRY_RUN; }, set(v) { DRY_RUN = v; } }, log);
+  onForceScan(() => safeCycle());
+
+  // Run first cycle immediately
+  safeCycle();
+
+  // Schedule cycles every 30 min during trading hours (Mon-Fri 07:00-18:30 MSK)
+  setInterval(() => {
+    const m = mskNow();
+    const dow = m.getDay();
+    if (dow === 0 || dow === 6) return;
+    const mins = m.getHours() * 60 + m.getMinutes();
+    if (mins >= 420 && mins <= 1110) safeCycle();
+  }, 30 * 60_000);
+
+  log(`Persistent mode: panel on :${PORT}, cycle every 30min`);
+} else {
+  // One-shot mode (cron)
+  runCycle().catch(e => { log(`FATAL: ${e.message}`); process.exit(1); });
+}

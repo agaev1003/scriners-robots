@@ -14,7 +14,8 @@ header{background:var(--surface);padding:18px 24px;border-bottom:2px solid var(-
 header h1{font-size:1.5rem;font-weight:700;letter-spacing:1px}
 header .subtitle{color:var(--muted);font-size:.82rem}
 .header-right{display:flex;align-items:center;gap:12px}
-.mode-pill{padding:4px 14px;border-radius:12px;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.mode-pill{padding:4px 14px;border-radius:12px;font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px;cursor:pointer;user-select:none;transition:all .2s}
+.mode-pill:hover{opacity:.8;transform:scale(1.05)}
 .mode-live{background:#D52B1E22;color:var(--red);border:1px solid var(--red)}
 .mode-dry{background:#b7950b22;color:var(--yellow);border:1px solid var(--yellow)}
 .last-run{font-size:.78rem;color:var(--muted)}
@@ -89,7 +90,7 @@ table.data-table tr:hover{background:var(--surface)}
     <div class="subtitle">Insides Without Inside — Управление торговым роботом</div>
   </div>
   <div class="header-right">
-    <span id="modePill" class="mode-pill mode-dry">ТЕСТ</span>
+    <span id="modePill" class="mode-pill mode-dry" onclick="toggleMode()" title="Нажмите для переключения режима">ТЕСТ</span>
     <span id="lastRun" class="last-run"></span>
   </div>
 </header>
@@ -221,7 +222,8 @@ async function api(path) {
 }
 
 async function loadAll() {
-  const t0 = Date.now();
+  const btn = document.querySelector('.btn-secondary');
+  if (btn) { btn.textContent = 'Загрузка...'; btn.disabled = true; }
   try {
     const [status, positions, history, curve, signals, config, logs] = await Promise.all([
       api('/api/status'), api('/api/positions'), api('/api/history'),
@@ -233,6 +235,7 @@ async function loadAll() {
   } catch (e) {
     showError('Ошибка загрузки: ' + e.message);
   }
+  if (btn) { btn.textContent = 'Обновить данные'; btn.disabled = false; }
   document.getElementById('refreshInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }
 
@@ -563,13 +566,49 @@ function renderLogs() {
 }
 
 /* ═══ ACTIONS ═══ */
+async function toggleMode() {
+  const s = cachedData.status;
+  if (!s) return;
+  const isCurrentlyDry = s.mode !== 'live';
+  const targetLive = isCurrentlyDry;
+  const msg = targetLive
+    ? '⚠️ ВНИМАНИЕ!\n\nВы переключаете робота в БОЕВОЙ режим.\nОн начнёт отправлять РЕАЛЬНЫЕ ордера на биржу.\n\nПродолжить?'
+    : 'Переключить робота в ТЕСТОВЫЙ режим?\nОрдера отправляться НЕ будут.';
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch(API + '/api/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ live: targetLive }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      alert(targetLive ? 'Режим: БОЕВОЙ' : 'Режим: ТЕСТ');
+      loadAll();
+    } else {
+      alert('Ошибка: ' + (j.message || 'unknown'));
+    }
+  } catch (e) { alert('Ошибка: ' + e.message); }
+}
+
 async function forceScan() {
+  const btn = document.querySelector('.toolbar button:first-child');
+  if (btn) { btn.textContent = 'Сканирую...'; btn.disabled = true; }
   try {
     const r = await fetch(API + '/api/force-scan', { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'Скан запущен');
-    setTimeout(loadAll, 3000);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+    if (j.ok) {
+      if (btn) btn.textContent = 'Скан запущен!';
+      setTimeout(loadAll, 5000);
+      setTimeout(() => { if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; } }, 60000);
+    } else {
+      alert(j.message || 'Ошибка');
+      if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+    }
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+    if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+  }
 }
 
 async function manualClose(ticker) {

@@ -38,7 +38,9 @@ export function onForceScan(cb) {
 /**
  * Start the web panel HTTP server.
  */
-export function startPanel(port, dryRun, log) {
+export function startPanel(port, modeRef, log) {
+  // modeRef: { get() → bool, set(v) } for live toggling
+  const isDryRun = () => typeof modeRef === 'object' ? modeRef.get() : modeRef;
   const srv = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -66,7 +68,7 @@ export function startPanel(port, dryRun, log) {
           const open = st.positions.filter(p => p.status === 'open');
           const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots * (p.lotSize || 1), 0);
           return json(res, {
-            mode: dryRun ? 'dry_run' : 'live',
+            mode: isDryRun() ? 'dry_run' : 'live',
             lastRunAt: st.lastRunAt,
             livePrimedAt: st.livePrimedAt,
             positionCount: open.length,
@@ -101,7 +103,7 @@ export function startPanel(port, dryRun, log) {
         if (path === '/api/config') {
           return json(res, {
             P,
-            DRY_RUN: dryRun,
+            DRY_RUN: isDryRun(),
             ACCOUNT: process.env.TKF_ACCOUNT_ID ? '***' : '',
             MAX_CAPITAL_RUB: 50_000,
           });
@@ -145,6 +147,18 @@ export function startPanel(port, dryRun, log) {
             return json(res, { ok: true, message: 'Scan triggered' });
           }
           return json(res, { ok: false, message: 'No scan callback registered' });
+        }
+
+        // POST /api/mode — toggle dry_run / live
+        if (path === '/api/mode') {
+          const body = await readBody(req);
+          const { live } = JSON.parse(body);
+          if (typeof modeRef === 'object' && modeRef.set) {
+            modeRef.set(!live);
+            log(`PANEL: mode changed to ${live ? 'LIVE' : 'DRY_RUN'}`);
+            return json(res, { ok: true, mode: live ? 'live' : 'dry_run' });
+          }
+          return json(res, { ok: false, message: 'Mode toggle not supported in this configuration' });
         }
 
         // POST /api/update — git pull + reload index.html
@@ -194,4 +208,12 @@ export function startPanel(port, dryRun, log) {
 
 function json(res, data) {
   res.end(JSON.stringify(data));
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let d = '';
+    req.on('data', c => d += c);
+    req.on('end', () => resolve(d));
+  });
 }

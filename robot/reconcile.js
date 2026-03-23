@@ -77,13 +77,15 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
     const ticker = tickerOf(uid);
     if (!ticker) continue;
 
-    log(`RECONCILE: importing untracked ${ticker} (${info.balance} lots)`);
+    log(`RECONCILE: importing untracked ${ticker} (${info.balance} shares)`);
     let price = 0;
     try {
       const prices = await tkf.getLastPrices(token, [uid]);
       price = prices[uid] || 0;
     } catch {}
 
+    const lotSize = instrMap[ticker]?.lot || 1;
+    const lots = Math.max(1, Math.round(info.balance / lotSize));
     state.positions.push({
       ticker, uid, strategy: 'S1',
       tier: P.tiers[2], // BASE default
@@ -91,24 +93,38 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
       signalDate: today, entryDate: today,
       entryPrice: price,
       catStopPx: price * (1 - P.stopPct / 100),
-      lots: info.balance, lotSize: instrMap[ticker]?.lot || 1,
+      lots, lotSize,
       peak: price, held: 0,
       stopOrderId: null, currentStopPx: 0,
       status: 'open',
     });
   }
 
-  // 4. Update entryPrice from portfolio averagePositionPrice
+  // 4. Update entryPrice and lots from portfolio
   try {
     const portfolio = await tkf.getPortfolio(token, accountId);
     for (const pp of portfolio.positions || []) {
       const avgPx = tkf.quotToNum(pp.averagePositionPrice);
       if (!avgPx) continue;
       const pos = state.positions.find(p => uidOf(p.ticker) === pp.instrumentUid);
-      if (pos && pos.entryPrice > 0 && Math.abs(avgPx - pos.entryPrice) / pos.entryPrice > 0.001) {
+      if (!pos) continue;
+
+      // Update entry price if changed
+      if (pos.entryPrice > 0 && Math.abs(avgPx - pos.entryPrice) / pos.entryPrice > 0.001) {
         log(`RECONCILE: ${pos.ticker} EP ${pos.entryPrice.toFixed(2)} → ${avgPx.toFixed(2)}`);
         pos.entryPrice = avgPx;
         pos.catStopPx = avgPx * (1 - P.stopPct / 100);
+      }
+
+      // Update lots from portfolio quantity (shares → lots)
+      const qtyShares = parseFloat(pp.quantity?.units || '0');
+      if (qtyShares > 0) {
+        const lotSize = pos.lotSize || instrMap[pos.ticker]?.lot || 1;
+        const correctLots = Math.max(1, Math.round(qtyShares / lotSize));
+        if (correctLots !== pos.lots) {
+          log(`RECONCILE: ${pos.ticker} lots ${pos.lots} → ${correctLots} (${qtyShares} shares, lotSize=${lotSize})`);
+          pos.lots = correctLots;
+        }
       }
     }
   } catch (e) {
