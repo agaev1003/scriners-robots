@@ -13,7 +13,7 @@ import { P, BLACKLIST, scanTicker } from './signals.js';
 import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB } from './state.js';
 import { updatePositionFromCandles, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
-import { startPanel, onForceScan } from './panel.js';
+import { startPanel, onForceScan, loadPersistedMode, markCycleCompleted } from './panel.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +31,12 @@ const TOKEN   = process.env.TKF_TOKEN;
 let   ACCOUNT = process.env.TKF_ACCOUNT_ID;
 let   DRY_RUN = process.env.DRY_RUN !== 'false';
 const PORT    = parseInt(process.env.PORT || '0', 10);
+
+// Restore persisted mode (survives restarts)
+const _persistedMode = loadPersistedMode();
+if (_persistedMode !== null) {
+  DRY_RUN = !_persistedMode;  // live=true → DRY_RUN=false
+}
 
 const MIN_BARS  = 150;
 const PARALLEL  = 10;
@@ -416,7 +422,7 @@ let cycleRunning = false;
 async function safeCycle() {
   if (cycleRunning) { log('Cycle already running, skip'); return; }
   cycleRunning = true;
-  try { await runCycle(); }
+  try { await runCycle(); markCycleCompleted(); }
   catch (e) { log(`CYCLE ERROR: ${e.message}`); }
   finally { cycleRunning = false; }
 }
@@ -429,16 +435,16 @@ if (PORT) {
   // Run first cycle immediately
   safeCycle();
 
-  // Schedule cycles every 30 min during trading hours (Mon-Fri 07:00-18:30 MSK)
+  // Schedule cycles every 10 min during trading hours (Mon-Fri 07:00-18:30 MSK)
   setInterval(() => {
     const m = mskNow();
     const dow = m.getDay();
     if (dow === 0 || dow === 6) return;
     const mins = m.getHours() * 60 + m.getMinutes();
     if (mins >= 420 && mins <= 1110) safeCycle();
-  }, 30 * 60_000);
+  }, 10 * 60_000);
 
-  log(`Persistent mode: panel on :${PORT}, cycle every 30min`);
+  log(`Persistent mode: panel on :${PORT}, cycle every 10min, DRY_RUN=${DRY_RUN}`);
 } else {
   // One-shot mode (cron)
   runCycle().catch(e => { log(`FATAL: ${e.message}`); process.exit(1); });
