@@ -29,7 +29,7 @@ try {
 /* ═══ CONFIG (from env) ═══ */
 const TOKEN   = process.env.TKF_TOKEN;
 let   ACCOUNT = process.env.TKF_ACCOUNT_ID;
-const DRY_RUN = process.env.DRY_RUN !== 'false';
+let   DRY_RUN = process.env.DRY_RUN !== 'false';
 const PORT    = parseInt(process.env.PORT || '0', 10);
 
 const MIN_BARS  = 150;
@@ -399,7 +399,7 @@ async function safeCycle() {
 
 if (PORT) {
   // Persistent mode: panel + scheduled cycles
-  startPanel(PORT, DRY_RUN, log);
+  startPanel(PORT, { get() { return DRY_RUN; }, set(v) { DRY_RUN = v; } }, log);
   onForceScan(() => safeCycle());
 
   // Run first cycle immediately
