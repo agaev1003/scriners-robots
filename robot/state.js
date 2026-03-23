@@ -11,7 +11,7 @@ const STATE_FILE        = join(__dirname, 'state.json');
 const MAX_HISTORY       = 2000;
 const MAX_CURVE         = 2500;
 const PROCESSED_TTL_MS  = 40 * 86400_000;   // 40 days
-const MAX_CAPITAL_RUB   = 50_000;
+export const MAX_CAPITAL_RUB   = 50_000;
 
 /* ─── Empty state template ─── */
 export function emptyState() {
@@ -92,7 +92,7 @@ export function primeIfNeeded(st, signals) {
 
 /* ─── Record closed trade to history ─── */
 export function recordTrade(st, pos, exitPrice, exitDate, reason) {
-  const ret = (exitPrice / pos.entryPrice - 1) * 100;
+  const ret = pos.entryPrice > 0 ? (exitPrice / pos.entryPrice - 1) * 100 : 0;
   const trade = {
     ...pos,
     status: 'closed',

@@ -7,12 +7,12 @@ import { P } from './signals.js';
 /**
  * Reconcile robot state with broker positions.
  *
- * Steps (spec 12.3):
+ * Steps (spec 12.3, modified):
  * 1. Get positions from broker
- * 2. Mark positions gone from broker as closed (broker_gone)
- * 3. Import untracked broker positions (tier=BASE defaults)
+ * 2. Mark robot-tracked positions gone from broker as closed (broker_gone)
+ * 3. Log untracked broker positions (DO NOT auto-import)
  * 4. Update entryPrice from averagePositionPrice (if changed >0.1%)
- * 5. Update cashRub from money balances
+ * 5. cashRub managed by robot's own buy/sell accounting (not overwritten from broker)
  *
  * @param {Object} state - robot state (mutated in place)
  * @param {Object} instrMap - { ticker: { uid, lot, ... } }
@@ -68,36 +68,16 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
   }
   state.positions = state.positions.filter(p => p.status === 'open');
 
-  // 3. Import untracked broker positions
+  // 3. Log untracked broker positions (DO NOT auto-import)
+  // Auto-importing caused the robot to track positions it didn't open,
+  // inflating equity curve and causing phantom drawdowns when they close externally.
   const trackedUids = new Set(
     state.positions.map(p => uidOf(p.ticker)).filter(Boolean)
   );
   for (const [uid, info] of Object.entries(brokerSecs)) {
     if (trackedUids.has(uid) || info.balance <= 0) continue;
     const ticker = tickerOf(uid);
-    if (!ticker) continue;
-
-    log(`RECONCILE: importing untracked ${ticker} (${info.balance} shares)`);
-    let price = 0;
-    try {
-      const prices = await tkf.getLastPrices(token, [uid]);
-      price = prices[uid] || 0;
-    } catch {}
-
-    const lotSize = instrMap[ticker]?.lot || 1;
-    const lots = Math.max(1, Math.round(info.balance / lotSize));
-    state.positions.push({
-      ticker, uid, strategy: 'S1',
-      tier: P.tiers[2], // BASE default
-      vr: 0, atr20: 0,
-      signalDate: today, entryDate: today,
-      entryPrice: price,
-      catStopPx: price * (1 - P.stopPct / 100),
-      lots, lotSize,
-      peak: price, held: 0,
-      stopOrderId: null, currentStopPx: 0,
-      status: 'open',
-    });
+    log(`RECONCILE: untracked position ${ticker || uid} (${info.balance} shares) — ignored (not opened by robot)`);
   }
 
   // 4. Update entryPrice and lots from portfolio
@@ -131,11 +111,9 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
     log(`WARN: portfolio fetch failed: ${e.message}`);
   }
 
-  // 5. Update cashRub
-  for (const m of posData.money || []) {
-    if ((m.currency || '').toLowerCase() === 'rub') {
-      state.cashRub = tkf.quotToNum(m);
-      break;
-    }
-  }
+  // 5. Update cashRub — only track robot's capital, not full account balance
+  // The robot manages a fixed budget (MAX_CAPITAL from state), not the entire broker account.
+  // We update cashRub from broker only if it's LESS than current cashRub (money was withdrawn),
+  // but never inflate it beyond the robot's capital allocation.
+  // cashRub is maintained by the robot's own buy/sell accounting.
 }

@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 import * as tkf from './tinkoff.js';
 import { P, BLACKLIST, scanTicker } from './signals.js';
-import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint } from './state.js';
+import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB } from './state.js';
 import { updatePositionFromCandles, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
 import { startPanel, onForceScan } from './panel.js';
@@ -210,6 +210,10 @@ async function managePositions(state, candleMap, divMap, instrMap) {
 }
 
 async function doExit(pos, price, reason, state, instrMap) {
+  if (!price || price <= 0 || !isFinite(price)) {
+    log(`ERROR ${pos.ticker}: invalid exit price ${price}, using entryPrice as fallback`);
+    price = pos.entryPrice;
+  }
   const uid = instrMap[pos.ticker]?.uid;
   if (pos.stopOrderId) {
     try { await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log); }
@@ -217,7 +221,12 @@ async function doExit(pos, price, reason, state, instrMap) {
   }
   if (uid) await executeSell(TOKEN, ACCOUNT, uid, pos.lots, DRY_RUN, log);
 
-  state.cashRub += price * pos.lots * (pos.lotSize || 1);
+  const exitValue = price * pos.lots * (pos.lotSize || 1);
+  if (!isFinite(exitValue)) {
+    log(`ERROR ${pos.ticker}: NaN exit value, skipping cashRub update`);
+  } else {
+    state.cashRub += exitValue;
+  }
   const trade = recordTrade(state, pos, price, todayMSK(), reason);
   pos.status = 'closed';
   log(`EXIT ${pos.ticker}: ${reason} ret=${trade.ret.toFixed(2)}%`);
@@ -244,8 +253,9 @@ async function doEntries(state, candleMap, divMap, instrMap) {
     return;
   }
 
-  // Split budget evenly between strategies (each gets 50% of current cash)
-  const budgetPerStrategy = state.cashRub * 0.5;
+  // Split budget evenly between strategies (each gets 50% of robot's cash, capped)
+  const safeCash = Math.min(state.cashRub, MAX_CAPITAL_RUB);
+  const budgetPerStrategy = safeCash * 0.5;
 
   for (const strat of ['S1', 'S2']) {
     const cands = candidates.filter(s => s.strategy === strat);
@@ -289,6 +299,10 @@ async function doEntries(state, candleMap, divMap, instrMap) {
       if (result.filled) {
         // Use actual execution price if available, fall back to last price
         const fillPx = result.executedPrice || px;
+        if (!fillPx || fillPx <= 0 || !isFinite(fillPx)) {
+          log(`ERROR ${s.secid}: invalid fill price ${fillPx}, skipping position`);
+          continue;
+        }
         if (result.executedPrice) log(`FILL ${s.secid}: exec @${fillPx.toFixed(2)} (last was ${px.toFixed(2)})`);
         const catStopPx = fillPx * (1 - P.stopPct / 100);
         let stopId = null;
@@ -311,18 +325,20 @@ async function doEntries(state, candleMap, divMap, instrMap) {
 
 /* ═══ ACCOUNT CURVE ═══ */
 async function updateCurve(state, instrMap) {
-  if (!ACCOUNT) return;
   try {
-    const uids = state.positions.filter(p => p.status === 'open').map(p => instrMap[p.ticker]?.uid).filter(Boolean);
+    const openPositions = state.positions.filter(p => p.status === 'open');
+    const uids = openPositions.map(p => instrMap[p.ticker]?.uid).filter(Boolean);
     let openVal = 0;
     if (uids.length) {
       const prices = await tkf.getLastPrices(TOKEN, uids);
-      for (const pos of state.positions.filter(p => p.status === 'open')) {
+      for (const pos of openPositions) {
         const px = prices[instrMap[pos.ticker]?.uid] || pos.entryPrice;
         openVal += pos.lots * (pos.lotSize || instrMap[pos.ticker]?.lot || 1) * px;
       }
     }
-    recordCurvePoint(state, state.cashRub + openVal, state.cashRub, state.positions.filter(p => p.status === 'open').length);
+    // Track only robot's own capital: cashRub (robot-managed) + open position value
+    const totalRub = state.cashRub + openVal;
+    recordCurvePoint(state, totalRub, state.cashRub, openPositions.length);
   } catch (e) { log(`WARN: curve: ${e.message}`); }
 }
 
@@ -366,8 +382,16 @@ export async function runCycle() {
 
   await managePositions(state, candleMap, divMap, instrMap);
 
+  // Drawdown circuit breaker: stop new entries if capital dropped > 40% from initial
+  const drawdownPct = (1 - state.cashRub / MAX_CAPITAL_RUB) * 100;
+  const openCount = state.positions.filter(p => p.status === 'open').length;
+
   if (isEntryWindow()) {
-    await doEntries(state, candleMap, divMap, instrMap);
+    if (drawdownPct > 40 && openCount === 0) {
+      log(`CIRCUIT BREAKER: drawdown ${drawdownPct.toFixed(1)}% > 40%, no new entries`);
+    } else {
+      await doEntries(state, candleMap, divMap, instrMap);
+    }
   } else {
     log('Outside entry window');
   }
