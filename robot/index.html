@@ -221,7 +221,8 @@ async function api(path) {
 }
 
 async function loadAll() {
-  const t0 = Date.now();
+  const btn = document.querySelector('.btn-secondary');
+  if (btn) { btn.textContent = 'Загрузка...'; btn.disabled = true; }
   try {
     const [status, positions, history, curve, signals, config, logs] = await Promise.all([
       api('/api/status'), api('/api/positions'), api('/api/history'),
@@ -233,6 +234,7 @@ async function loadAll() {
   } catch (e) {
     showError('Ошибка загрузки: ' + e.message);
   }
+  if (btn) { btn.textContent = 'Обновить данные'; btn.disabled = false; }
   document.getElementById('refreshInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }
 
@@ -564,12 +566,23 @@ function renderLogs() {
 
 /* ═══ ACTIONS ═══ */
 async function forceScan() {
+  const btn = document.querySelector('.toolbar button:first-child');
+  if (btn) { btn.textContent = 'Сканирую...'; btn.disabled = true; }
   try {
     const r = await fetch(API + '/api/force-scan', { method: 'POST' });
     const j = await r.json();
-    alert(j.message || 'Скан запущен');
-    setTimeout(loadAll, 3000);
-  } catch (e) { alert('Ошибка: ' + e.message); }
+    if (j.ok) {
+      if (btn) btn.textContent = 'Скан запущен!';
+      setTimeout(loadAll, 5000);
+      setTimeout(() => { if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; } }, 60000);
+    } else {
+      alert(j.message || 'Ошибка');
+      if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+    }
+  } catch (e) {
+    alert('Ошибка: ' + e.message);
+    if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+  }
 }
 
 async function manualClose(ticker) {
