@@ -57,7 +57,12 @@ export async function reconcile(state, instrMap, token, accountId, log, today) {
         }
       } catch {}
       const ret = pos.entryPrice > 0 ? (exitPrice / pos.entryPrice - 1) * 100 : 0;
-      log(`RECONCILE: ${pos.ticker} gone from broker → closed (ret=${ret.toFixed(2)}%)`);
+      // Restore position value to cashRub (same as doExit does)
+      const exitValue = exitPrice * pos.lots * (pos.lotSize || instrMap[pos.ticker]?.lot || 1);
+      if (isFinite(exitValue) && exitValue > 0) {
+        state.cashRub += exitValue;
+      }
+      log(`RECONCILE: ${pos.ticker} gone from broker → closed (ret=${ret.toFixed(2)}%, returned ${(exitValue||0).toFixed(0)} RUB)`);
       pos.status = 'closed';
       pos.exitDate = today;
       pos.exitPrice = exitPrice;
