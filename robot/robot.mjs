@@ -387,6 +387,7 @@ export async function runCycle() {
   const state = loadState();
 
   // Sync initial capital from broker (both LIVE and DRY_RUN on first run)
+  log(`SYNC CHECK: ACCOUNT=${ACCOUNT} initialCapital=${state.initialCapital} type=${typeof state.initialCapital}`);
   if (ACCOUNT && !state.initialCapital) {
     try {
       const posData = await tkf.getPositions(TOKEN, ACCOUNT);
