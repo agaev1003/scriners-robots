@@ -213,6 +213,15 @@ export function startPanel(port, modeRef, log) {
           }
         }
 
+        // POST /api/reset-state — reset robot state (cash, positions, history, curve)
+        if (path === '/api/reset-state') {
+          const { emptyState } = await import('./state.js');
+          const fresh = emptyState();
+          saveState(fresh);
+          log('PANEL: state reset to fresh (cash=50000, no positions)');
+          return json(res, { ok: true, message: 'State reset to initial' });
+        }
+
         // POST /api/restart — restart panel service via systemctl
         if (path === '/api/restart') {
           log('PANEL: restart requested');
