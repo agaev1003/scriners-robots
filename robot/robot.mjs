@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 import * as tkf from './tinkoff.js';
 import { P, BLACKLIST, scanTicker } from './signals.js';
-import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB } from './state.js';
+import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB, setMaxCapital } from './state.js';
 import { updatePositionFromCandles, checkExit, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
 import { startPanel, onForceScan, loadPersistedMode, markCycleCompleted } from './panel.js';
@@ -369,6 +369,37 @@ export async function runCycle() {
   }
 
   const state = loadState();
+
+  // Sync capital from broker on first live run (or if initialCapital not set)
+  if (ACCOUNT && !DRY_RUN && !state.initialCapital) {
+    try {
+      const posData = await tkf.getPositions(TOKEN, ACCOUNT);
+      let rubBalance = 0;
+      for (const m of posData.money || []) {
+        if ((m.currency || '').toLowerCase() === 'rub') {
+          rubBalance = tkf.quotToNum(m);
+        }
+      }
+      // Add value of existing securities
+      const portfolio = await tkf.getPortfolio(TOKEN, ACCOUNT);
+      let secValue = 0;
+      for (const pp of portfolio.positions || []) {
+        const px = tkf.quotToNum(pp.currentPrice);
+        const qty = parseFloat(pp.quantity?.units || '0');
+        if (px > 0 && qty > 0) secValue += px * qty;
+      }
+      const totalAccount = rubBalance + secValue;
+      if (totalAccount > 0) {
+        state.initialCapital = totalAccount;
+        state.cashRub = rubBalance;
+        setMaxCapital(totalAccount);
+        log(`ACCOUNT SYNC: balance=${rubBalance.toFixed(0)} securities=${secValue.toFixed(0)} total=${totalAccount.toFixed(0)} RUB`);
+      }
+    } catch (e) { log(`WARN: account balance sync failed: ${e.message}`); }
+  }
+
+  // Restore MAX_CAPITAL_RUB from saved initialCapital
+  if (state.initialCapital) setMaxCapital(state.initialCapital);
 
   let instrMap;
   try {
