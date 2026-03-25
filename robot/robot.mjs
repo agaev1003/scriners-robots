@@ -387,7 +387,7 @@ export async function runCycle() {
   const state = loadState();
 
   // Sync initial capital from broker (both LIVE and DRY_RUN on first run)
-  log(`SYNC CHECK: ACCOUNT=${ACCOUNT} initialCapital=${state.initialCapital} type=${typeof state.initialCapital}`);
+  // Uses only cash balance — securities are tracked separately by the robot
   if (ACCOUNT && !state.initialCapital) {
     try {
       const posData = await tkf.getPositions(TOKEN, ACCOUNT);
@@ -397,17 +397,10 @@ export async function runCycle() {
           rubBalance = tkf.quotToNum(m);
         }
       }
-      const portfolio = await tkf.getPortfolio(TOKEN, ACCOUNT);
-      let secValue = 0;
-      for (const pp of portfolio.positions || []) {
-        const px = tkf.quotToNum(pp.currentPrice);
-        const qty = parseFloat(pp.quantity?.units || '0');
-        if (px > 0 && qty > 0) secValue += px * qty;
-      }
-      state.initialCapital = rubBalance + secValue;
+      state.initialCapital = rubBalance;
       state.cashRub = rubBalance;
       setMaxCapital(state.initialCapital);
-      log(`INITIAL CAPITAL: ${state.initialCapital.toFixed(0)} RUB (cash=${rubBalance.toFixed(0)} + sec=${secValue.toFixed(0)})`);
+      log(`INITIAL CAPITAL: ${state.initialCapital.toFixed(0)} RUB (cash only)`);
     } catch (e) { log(`WARN: initial capital sync failed: ${e.message}`); }
   }
 
