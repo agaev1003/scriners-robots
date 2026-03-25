@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import * as tkf from './tinkoff.js';
 import { P, BLACKLIST, scanTicker } from './signals.js';
 import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB } from './state.js';
-import { updatePositionFromCandles, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
+import { updatePositionFromCandles, checkExit, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
 import { startPanel, onForceScan, loadPersistedMode, markCycleCompleted } from './panel.js';
 
@@ -180,10 +180,11 @@ async function managePositions(state, candleMap, divMap, instrMap) {
       continue;
     }
 
-    // Max hold exit
-    if (held >= pos.tier.maxHold) {
-      log(`EXIT ${pos.ticker}: max_hold (${held}d)`);
-      await doExit(pos, lastBar.c, 'max_hold', state, instrMap);
+    // Check all exit conditions (max_hold, cat_stop, trailing_stop)
+    const exitCheck = checkExit(pos, lastBar, divGapToday);
+    if (exitCheck) {
+      log(`EXIT ${pos.ticker}: ${exitCheck.reason} (held=${held}d)`);
+      await doExit(pos, exitCheck.exitPrice, exitCheck.reason, state, instrMap);
       continue;
     }
 
@@ -375,7 +376,7 @@ export async function runCycle() {
     log(`Instruments: ${Object.keys(instrMap).length}`);
   } catch (e) { log(`ERROR instruments: ${e.message}`); return; }
 
-  if (ACCOUNT) await reconcile(state, instrMap, TOKEN, ACCOUNT, log, todayMSK());
+  if (ACCOUNT && !DRY_RUN) await reconcile(state, instrMap, TOKEN, ACCOUNT, log, todayMSK());
 
   let tickers;
   try {
@@ -388,12 +389,18 @@ export async function runCycle() {
 
   await managePositions(state, candleMap, divMap, instrMap);
 
-  // Drawdown circuit breaker: stop new entries if capital dropped > 40% from initial
-  const drawdownPct = (1 - state.cashRub / MAX_CAPITAL_RUB) * 100;
-  const openCount = state.positions.filter(p => p.status === 'open').length;
+  // Drawdown circuit breaker: stop new entries if total equity dropped > 40% from initial
+  let openVal = 0;
+  for (const pos of state.positions.filter(p => p.status === 'open')) {
+    const lastBar = candleMap[pos.ticker]?.at(-1);
+    const px = lastBar?.c || pos.entryPrice;
+    openVal += px * pos.lots * (pos.lotSize || instrMap[pos.ticker]?.lot || 1);
+  }
+  const totalEquity = state.cashRub + openVal;
+  const drawdownPct = (1 - totalEquity / MAX_CAPITAL_RUB) * 100;
 
   if (isEntryWindow()) {
-    if (drawdownPct > 40 && openCount === 0) {
+    if (drawdownPct > 40) {
       log(`CIRCUIT BREAKER: drawdown ${drawdownPct.toFixed(1)}% > 40%, no new entries`);
     } else {
       await doEntries(state, candleMap, divMap, instrMap);

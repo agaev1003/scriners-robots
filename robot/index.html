@@ -144,6 +144,7 @@ table.data-table tr:hover{background:var(--surface)}
   <button class="btn-secondary" onclick="loadAll()">Обновить данные</button>
   <button class="btn-update" onclick="gitUpdate()">Обновить код</button>
   <button class="btn-restart" onclick="restartServices()">Перезапуск</button>
+  <button style="background:#c0392b;color:#fff;border:none" onclick="resetState()">Сброс state</button>
   <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
     <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто
     <select id="autoInterval" onchange="toggleAuto()" style="font-size:.78rem;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--surface)">
@@ -755,6 +756,20 @@ async function restartServices() {
     const j = await r.json();
     toast(j.message || 'Перезапуск...', 'info');
     setTimeout(() => location.reload(), 3000);
+  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
+}
+
+async function resetState() {
+  const ok = await showModal('Сброс state', 'Сбросить state робота?<br>Cash вернётся к 50 000, все позиции и история будут удалены.', [
+    { label: 'Сбросить', className: 'modal-btn-danger', value: true },
+    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
+  ]);
+  if (!ok) return;
+  try {
+    const r = await fetch(API + '/api/reset-state', { method: 'POST' });
+    const j = await r.json();
+    toast(j.ok ? 'State сброшен!' : ('Ошибка: ' + j.message), j.ok ? 'info' : 'error');
+    if (j.ok) loadAll();
   } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
