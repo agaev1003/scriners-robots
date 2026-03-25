@@ -140,20 +140,9 @@ table.data-table tr:hover{background:var(--surface)}
 </header>
 
 <div class="toolbar">
-  <button onclick="forceScan()">Принуд. скан</button>
-  <button class="btn-secondary" onclick="loadAll()">Обновить данные</button>
-  <button class="btn-update" onclick="gitUpdate()">Обновить код</button>
-  <button class="btn-restart" onclick="restartServices()">Перезапуск</button>
-  <button style="background:#c0392b;color:#fff;border:none" onclick="resetState()">Сброс state</button>
-  <label style="display:flex;align-items:center;gap:5px;font-size:.82rem;color:var(--muted);cursor:pointer">
-    <input type="checkbox" id="chkAuto" checked onchange="toggleAuto()" style="accent-color:var(--accent);width:15px;height:15px"> Авто
-    <select id="autoInterval" onchange="toggleAuto()" style="font-size:.78rem;padding:2px 4px;border-radius:4px;border:1px solid var(--border);background:var(--surface)">
-      <option value="10000">10с</option>
-      <option value="30000" selected>30с</option>
-      <option value="60000">60с</option>
-      <option value="300000">5мин</option>
-    </select>
-  </label>
+  <button onclick="forceScan()">Скан</button>
+  <button class="btn-update" onclick="updateAndRestart()">Обновить + Перезапуск</button>
+  <button style="background:#c0392b;color:#fff;border:none" onclick="resetState()">Сброс</button>
   <div class="cycle-timer" id="cycleTimer"></div>
   <div class="refresh-info" id="refreshInfo"></div>
 </div>
@@ -163,8 +152,7 @@ table.data-table tr:hover{background:var(--surface)}
 <!-- Status cards -->
 <div class="stats-row" id="statusCards">
   <div class="stat-card"><div class="label">Свободный кэш</div><div class="value" id="vCash">—</div></div>
-  <div class="stat-card"><div class="label">Экспозиция</div><div class="value" id="vExposure">—</div></div>
-  <div class="stat-card"><div class="label">Общий капитал</div><div class="value" id="vTotal">—</div></div>
+  <div class="stat-card"><div class="label">В позициях</div><div class="value" id="vExposure">—</div></div>
   <div class="stat-card"><div class="label">P&L от старта</div><div class="value" id="vPnl">—</div></div>
   <div class="stat-card"><div class="label">Дневной P&L</div><div class="value" id="vDailyPnl">—</div></div>
   <div class="stat-card"><div class="label">Позиции</div><div class="value" id="vPosCount">—</div></div>
@@ -313,8 +301,6 @@ async function api(path) {
 }
 
 async function loadAll() {
-  const btn = document.querySelector('.btn-secondary');
-  if (btn) { btn.textContent = 'Загрузка...'; btn.disabled = true; }
   try {
     const [status, positions, history, curve, signals, config, logs] = await Promise.all([
       api('/api/status'), api('/api/positions'), api('/api/history'),
@@ -328,7 +314,6 @@ async function loadAll() {
     showError('Ошибка загрузки: ' + e.message);
     setConnectionStatus(false);
   }
-  if (btn) { btn.textContent = 'Обновить данные'; btn.disabled = false; }
   document.getElementById('refreshInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru-RU');
 }
 
@@ -372,9 +357,6 @@ function renderStatus() {
 
   document.getElementById('vCash').textContent = fmtRub(s.cashRub);
   document.getElementById('vExposure').textContent = fmtRub(s.exposureRub);
-
-  const vTotal = document.getElementById('vTotal');
-  vTotal.textContent = fmtRub(total);
 
   const vPnl = document.getElementById('vPnl');
   vPnl.textContent = fmtPct(pnlPct);
@@ -702,17 +684,17 @@ async function forceScan() {
     const r = await fetch(API + '/api/force-scan', { method: 'POST' });
     const j = await r.json();
     if (j.ok) {
-      if (btn) btn.textContent = 'Скан запущен!';
+      if (btn) btn.textContent = 'Запущен!';
       toast('Скан запущен', 'success');
       setTimeout(loadAll, 5000);
-      setTimeout(() => { if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; } }, 60000);
+      setTimeout(() => { if (btn) { btn.textContent = 'Скан'; btn.disabled = false; } }, 60000);
     } else {
       toast(j.message || 'Ошибка', 'error');
-      if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+      if (btn) { btn.textContent = 'Скан'; btn.disabled = false; }
     }
   } catch (e) {
     toast('Ошибка: ' + e.message, 'error');
-    if (btn) { btn.textContent = 'Принуд. скан'; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Скан'; btn.disabled = false; }
   }
 }
 
@@ -730,37 +712,27 @@ async function manualClose(ticker) {
   } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
-/* ═══ GIT UPDATE & RESTART ═══ */
-async function gitUpdate() {
-  const ok = await showModal('Обновление кода', 'Выполнить <b>git pull</b> с GitHub?<br>После обновления страница перезагрузится.', [
+/* ═══ UPDATE + RESTART ═══ */
+async function updateAndRestart() {
+  const ok = await showModal('Обновить и перезапустить', 'Выполнить <b>git pull</b> и перезапустить робота?<br>Режим (ТЕСТ/БОЕВОЙ) сохранится.', [
     { label: 'Обновить', className: 'modal-btn-confirm', value: true },
     { label: 'Отмена', className: 'modal-btn-cancel', value: false },
   ]);
   if (!ok) return;
   try {
-    const r = await fetch(API + '/api/update', { method: 'POST' });
-    const j = await r.json();
-    toast(j.message || 'Готово', j.ok ? 'success' : 'error');
-    if (j.ok) setTimeout(() => location.reload(), 1500);
-  } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
-}
-
-async function restartServices() {
-  const ok = await showModal('Перезапуск сервисов', 'Перезапустить <b>moex-panel</b> и <b>moex-robot</b>?<br>Режим (ТЕСТ/БОЕВОЙ) сохранится.', [
-    { label: 'Перезапустить', className: 'modal-btn-danger', value: true },
-    { label: 'Отмена', className: 'modal-btn-cancel', value: false },
-  ]);
-  if (!ok) return;
-  try {
-    const r = await fetch(API + '/api/restart', { method: 'POST' });
-    const j = await r.json();
-    toast(j.message || 'Перезапуск...', 'info');
-    setTimeout(() => location.reload(), 3000);
+    const r1 = await fetch(API + '/api/update', { method: 'POST' });
+    const j1 = await r1.json();
+    toast(j1.message || 'Код обновлён', j1.ok ? 'success' : 'error');
+    if (j1.ok) {
+      const r2 = await fetch(API + '/api/restart', { method: 'POST' });
+      toast('Перезапуск...', 'info');
+      setTimeout(() => location.reload(), 3000);
+    }
   } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
 async function resetState() {
-  const ok = await showModal('Сброс state', 'Сбросить state робота?<br>Cash вернётся к 50 000, все позиции и история будут удалены.', [
+  const ok = await showModal('Сброс state', 'Сбросить state робота?<br>Все позиции и история будут удалены. Баланс загрузится со счёта.', [
     { label: 'Сбросить', className: 'modal-btn-danger', value: true },
     { label: 'Отмена', className: 'modal-btn-cancel', value: false },
   ]);
@@ -773,14 +745,7 @@ async function resetState() {
   } catch (e) { toast('Ошибка: ' + e.message, 'error'); }
 }
 
-/* ═══ AUTO-REFRESH ═══ */
-function toggleAuto() {
-  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
-  if (document.getElementById('chkAuto').checked) {
-    const ms = parseInt(document.getElementById('autoInterval').value, 10);
-    autoTimer = setInterval(loadAll, ms);
-  }
-}
+/* ═══ AUTO-REFRESH (every 5 min) ═══ */
 
 /* ═══ CYCLE TIMER ═══ */
 async function updateCycleTimer() {
@@ -799,7 +764,7 @@ async function updateCycleTimer() {
 
 /* ═══ INIT ═══ */
 loadAll();
-toggleAuto();
+autoTimer = setInterval(loadAll, 5 * 60_000);
 updateCycleTimer();
 cycleTimerInterval = setInterval(updateCycleTimer, 5000);
 </script>
