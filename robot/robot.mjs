@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path';
 
 import * as tkf from './tinkoff.js';
 import { P, BLACKLIST, scanTicker } from './signals.js';
-import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB } from './state.js';
+import { loadState, saveState, markProcessed, isProcessed, primeIfNeeded, recordTrade, recordCurvePoint, MAX_CAPITAL_RUB, setMaxCapital } from './state.js';
 import { updatePositionFromCandles, checkExit, allocByVr, findAtrRotation, executeBuy, executeSell, placeStop, cancelStop } from './portfolio.js';
 import { reconcile } from './reconcile.js';
 import { startPanel, onForceScan, loadPersistedMode, markCycleCompleted } from './panel.js';
@@ -369,6 +369,38 @@ export async function runCycle() {
   }
 
   const state = loadState();
+
+  // Sync cash and portfolio from broker every live cycle
+  if (ACCOUNT && !DRY_RUN) {
+    try {
+      const posData = await tkf.getPositions(TOKEN, ACCOUNT);
+      let rubBalance = 0;
+      for (const m of posData.money || []) {
+        if ((m.currency || '').toLowerCase() === 'rub') {
+          rubBalance = tkf.quotToNum(m);
+        }
+      }
+      state.cashRub = rubBalance;
+
+      // First run: save total account value as initialCapital (for P&L baseline)
+      if (!state.initialCapital) {
+        const portfolio = await tkf.getPortfolio(TOKEN, ACCOUNT);
+        let secValue = 0;
+        for (const pp of portfolio.positions || []) {
+          const px = tkf.quotToNum(pp.currentPrice);
+          const qty = parseFloat(pp.quantity?.units || '0');
+          if (px > 0 && qty > 0) secValue += px * qty;
+        }
+        state.initialCapital = rubBalance + secValue;
+        log(`INITIAL CAPITAL: ${state.initialCapital.toFixed(0)} RUB (cash=${rubBalance.toFixed(0)} + sec=${secValue.toFixed(0)})`);
+      }
+      setMaxCapital(state.initialCapital);
+      log(`BROKER SYNC: cash=${rubBalance.toFixed(0)} RUB`);
+    } catch (e) { log(`WARN: broker sync failed: ${e.message}`); }
+  }
+
+  // DRY_RUN: restore MAX_CAPITAL_RUB from saved initialCapital
+  if (state.initialCapital) setMaxCapital(state.initialCapital);
 
   let instrMap;
   try {

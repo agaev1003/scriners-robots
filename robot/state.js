@@ -11,7 +11,7 @@ const STATE_FILE        = join(__dirname, 'state.json');
 const MAX_HISTORY       = 2000;
 const MAX_CURVE         = 2500;
 const PROCESSED_TTL_MS  = 40 * 86400_000;   // 40 days
-export const MAX_CAPITAL_RUB   = 50_000;
+export let MAX_CAPITAL_RUB     = 50_000;
 
 /* ─── Empty state template ─── */
 export function emptyState() {
@@ -22,9 +22,15 @@ export function emptyState() {
     history: [],            // closed trades
     accountCurve: [],       // { at, totalRub, cashRub, openCount }
     cashRub: MAX_CAPITAL_RUB,
+    initialCapital: null,   // set from broker on first live cycle
     livePrimedAt: null,     // ISO string — first-run priming timestamp
     lastRunAt: null,        // ISO string — last cycle timestamp
   };
+}
+
+/* ─── Update MAX_CAPITAL_RUB at runtime (from broker balance) ─── */
+export function setMaxCapital(val) {
+  MAX_CAPITAL_RUB = val;
 }
 
 /* ─── Default tier (used when deserialized tier is missing required fields) ─── */

@@ -91,6 +91,7 @@ export function startPanel(port, modeRef, log) {
         if (path === '/api/status') {
           const open = st.positions.filter(p => p.status === 'open');
           const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots * (p.lotSize || 1), 0);
+          const { MAX_CAPITAL_RUB } = await import('./state.js');
           return json(res, {
             mode: isDryRun() ? 'dry_run' : 'live',
             lastRunAt: st.lastRunAt,
@@ -98,6 +99,7 @@ export function startPanel(port, modeRef, log) {
             positionCount: open.length,
             cashRub: st.cashRub,
             exposureRub: exposure,
+            initialCapital: st.initialCapital || MAX_CAPITAL_RUB,
             processedSignals: Object.keys(st.processedSignals).length,
           });
         }
@@ -125,11 +127,13 @@ export function startPanel(port, modeRef, log) {
         }
 
         if (path === '/api/config') {
+          const { MAX_CAPITAL_RUB } = await import('./state.js');
           return json(res, {
             P,
             DRY_RUN: isDryRun(),
             ACCOUNT: process.env.TKF_ACCOUNT_ID ? '***' : '',
-            MAX_CAPITAL_RUB: 50_000,
+            MAX_CAPITAL_RUB,
+            initialCapital: st.initialCapital || MAX_CAPITAL_RUB,
           });
         }
 
@@ -218,7 +222,7 @@ export function startPanel(port, modeRef, log) {
           const { emptyState } = await import('./state.js');
           const fresh = emptyState();
           saveState(fresh);
-          log('PANEL: state reset to fresh (cash=50000, no positions)');
+          log('PANEL: state reset — capital will sync from broker on next live cycle');
           return json(res, { ok: true, message: 'State reset to initial' });
         }
 
