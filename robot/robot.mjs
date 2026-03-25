@@ -66,7 +66,7 @@ function isEntryWindow() {
   const dow = m.getDay();
   if (dow === 0 || dow === 6) return false;
   const mins = m.getHours() * 60 + m.getMinutes();
-  return ENTRY_WINDOWS.some(([a, b]) => mins >= a && mins < b);
+  return ENTRY_WINDOWS.some(([a, b]) => mins >= a && mins <= b);
 }
 
 /* ═══ SEMAPHORE ═══ */
@@ -204,12 +204,25 @@ async function managePositions(state, candleMap, divMap, instrMap) {
       const newStop = Math.max(tsPx, pos.catStopPx);
       if (newStop > (pos.currentStopPx || 0) + 0.01) {
         log(`STOP ${pos.ticker}: ${(pos.currentStopPx || 0).toFixed(2)} → ${newStop.toFixed(2)}`);
+        const oldStopId = pos.stopOrderId;
+        const oldStopPx = pos.currentStopPx;
         try {
-          if (pos.stopOrderId) await cancelStop(TOKEN, ACCOUNT, pos.stopOrderId, DRY_RUN, log);
+          if (oldStopId) await cancelStop(TOKEN, ACCOUNT, oldStopId, DRY_RUN, log);
           const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker]?.uid, pos.lots, newStop, DRY_RUN, log);
           pos.stopOrderId = id;
           pos.currentStopPx = newStop;
-        } catch (e) { log(`WARN ${pos.ticker}: stop update failed: ${e.message}`); }
+        } catch (e) {
+          log(`WARN ${pos.ticker}: stop update failed: ${e.message}`);
+          // Try to restore old stop if cancel succeeded but place failed
+          if (!pos.stopOrderId || pos.stopOrderId === oldStopId) {
+            try {
+              const id = await placeStop(TOKEN, ACCOUNT, instrMap[pos.ticker]?.uid, pos.lots, oldStopPx || pos.catStopPx, DRY_RUN, log);
+              pos.stopOrderId = id;
+              pos.currentStopPx = oldStopPx || pos.catStopPx;
+              log(`STOP ${pos.ticker}: restored previous stop @ ${pos.currentStopPx.toFixed(2)}`);
+            } catch (e2) { log(`ERROR ${pos.ticker}: stop restore also failed: ${e2.message}`); }
+          }
+        }
       }
     }
     if (divGapToday) log(`DIV_GAP ${pos.ticker}: skip stop checks`);
@@ -300,6 +313,8 @@ async function doEntries(state, candleMap, divMap, instrMap) {
 
       const lotSize = instrMap[s.secid]?.lot || 1;
       const lots = Math.max(1, Math.floor(s.stake / (px * lotSize)));
+      const estCost = px * lots * lotSize;
+      if (estCost > state.cashRub) { log(`SKIP ${s.secid}: cost ${estCost.toFixed(0)} > cash ${state.cashRub.toFixed(0)}`); continue; }
       log(`BUY ${s.secid}: VR=${s.vr.toFixed(1)} ${s.tier.name} ${lots}lots @${px.toFixed(2)}`);
 
       const result = await executeBuy(TOKEN, ACCOUNT, uid, lots, DRY_RUN, log);
@@ -344,6 +359,7 @@ async function updateCurve(state, instrMap) {
       }
     }
     // Track only robot's own capital: cashRub (robot-managed) + open position value
+    state.openValRub = openVal;
     const totalRub = state.cashRub + openVal;
     recordCurvePoint(state, totalRub, state.cashRub, openPositions.length);
   } catch (e) { log(`WARN: curve: ${e.message}`); }
@@ -468,10 +484,18 @@ process.on('SIGTERM', () => { log('SIGTERM'); process.exit(0); });
 
 let cycleRunning = false;
 
+const CYCLE_TIMEOUT_MS = 10 * 60_000; // 10 min max per cycle
+
 async function safeCycle() {
   if (cycleRunning) { log('Cycle already running, skip'); return; }
   cycleRunning = true;
-  try { await runCycle(); markCycleCompleted(); }
+  try {
+    await Promise.race([
+      runCycle(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('cycle timeout (10min)')), CYCLE_TIMEOUT_MS)),
+    ]);
+    markCycleCompleted();
+  }
   catch (e) { log(`CYCLE ERROR: ${e.message}`); }
   finally { cycleRunning = false; }
 }

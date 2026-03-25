@@ -90,7 +90,9 @@ export function startPanel(port, modeRef, log) {
 
         if (path === '/api/status') {
           const open = st.positions.filter(p => p.status === 'open');
-          const exposure = open.reduce((sum, p) => sum + p.entryPrice * p.lots * (p.lotSize || 1), 0);
+          // Use last known market value from updateCurve, fall back to entry value
+          const exposure = st.openValRub != null ? st.openValRub
+            : open.reduce((sum, p) => sum + p.entryPrice * p.lots * (p.lotSize || 1), 0);
           const { MAX_CAPITAL_RUB } = await import('./state.js');
           return json(res, {
             mode: isDryRun() ? 'dry_run' : 'live',
