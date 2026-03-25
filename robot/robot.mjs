@@ -370,8 +370,8 @@ export async function runCycle() {
 
   const state = loadState();
 
-  // Sync capital from broker on first live run (or if initialCapital not set)
-  if (ACCOUNT && !DRY_RUN && !state.initialCapital) {
+  // Sync cash and portfolio from broker every live cycle
+  if (ACCOUNT && !DRY_RUN) {
     try {
       const posData = await tkf.getPositions(TOKEN, ACCOUNT);
       let rubBalance = 0;
@@ -380,25 +380,26 @@ export async function runCycle() {
           rubBalance = tkf.quotToNum(m);
         }
       }
-      // Add value of existing securities
-      const portfolio = await tkf.getPortfolio(TOKEN, ACCOUNT);
-      let secValue = 0;
-      for (const pp of portfolio.positions || []) {
-        const px = tkf.quotToNum(pp.currentPrice);
-        const qty = parseFloat(pp.quantity?.units || '0');
-        if (px > 0 && qty > 0) secValue += px * qty;
+      state.cashRub = rubBalance;
+
+      // First run: save total account value as initialCapital (for P&L baseline)
+      if (!state.initialCapital) {
+        const portfolio = await tkf.getPortfolio(TOKEN, ACCOUNT);
+        let secValue = 0;
+        for (const pp of portfolio.positions || []) {
+          const px = tkf.quotToNum(pp.currentPrice);
+          const qty = parseFloat(pp.quantity?.units || '0');
+          if (px > 0 && qty > 0) secValue += px * qty;
+        }
+        state.initialCapital = rubBalance + secValue;
+        log(`INITIAL CAPITAL: ${state.initialCapital.toFixed(0)} RUB (cash=${rubBalance.toFixed(0)} + sec=${secValue.toFixed(0)})`);
       }
-      const totalAccount = rubBalance + secValue;
-      if (totalAccount > 0) {
-        state.initialCapital = totalAccount;
-        state.cashRub = rubBalance;
-        setMaxCapital(totalAccount);
-        log(`ACCOUNT SYNC: balance=${rubBalance.toFixed(0)} securities=${secValue.toFixed(0)} total=${totalAccount.toFixed(0)} RUB`);
-      }
-    } catch (e) { log(`WARN: account balance sync failed: ${e.message}`); }
+      setMaxCapital(state.initialCapital);
+      log(`BROKER SYNC: cash=${rubBalance.toFixed(0)} RUB`);
+    } catch (e) { log(`WARN: broker sync failed: ${e.message}`); }
   }
 
-  // Restore MAX_CAPITAL_RUB from saved initialCapital
+  // DRY_RUN: restore MAX_CAPITAL_RUB from saved initialCapital
   if (state.initialCapital) setMaxCapital(state.initialCapital);
 
   let instrMap;
