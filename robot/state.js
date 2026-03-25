@@ -34,7 +34,7 @@ export function setMaxCapital(val) {
 }
 
 /* ─── Default tier (used when deserialized tier is missing required fields) ─── */
-const DEFAULT_TIER = { name: 'BASE', minVr: 2.0, maxHold: 10, tsAfter: 3, tsDist: 3 };
+const DEFAULT_TIER = { name: 'BASE', minVr: 3.6, maxHold: 10, tsAfter: 5, tsDist: 1.4 };
 
 function validateTier(tier) {
   if (!tier || typeof tier.maxHold !== 'number' || typeof tier.tsAfter !== 'number' || typeof tier.tsDist !== 'number') {

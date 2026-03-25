@@ -229,7 +229,7 @@ table.data-table tr:hover{background:var(--surface)}
 
 <script>
 /* ═══ CONSTANTS ═══ */
-const INITIAL_CAPITAL = 50000;
+let INITIAL_CAPITAL = 50000; // updated from API on load
 const EXIT_REASONS = {
   max_hold: 'Макс. удержание',
   cat_stop: 'Кат. стоп',
@@ -350,10 +350,13 @@ function renderStatus() {
     ? 'Послед. цикл: ' + fmtDate(s.lastRunAt) + ' ' + fmtTime(s.lastRunAt)
     : 'Ещё не запускался';
 
+  // Update initial capital from API
+  if (s.initialCapital) INITIAL_CAPITAL = s.initialCapital;
+
   // Cards
   const total = (s.cashRub || 0) + (s.exposureRub || 0);
   const pnl = total - INITIAL_CAPITAL;
-  const pnlPct = (pnl / INITIAL_CAPITAL) * 100;
+  const pnlPct = INITIAL_CAPITAL > 0 ? (pnl / INITIAL_CAPITAL) * 100 : 0;
 
   document.getElementById('vCash').textContent = fmtRub(s.cashRub);
   document.getElementById('vExposure').textContent = fmtRub(s.exposureRub);

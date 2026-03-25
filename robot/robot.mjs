@@ -66,7 +66,7 @@ function isEntryWindow() {
   const dow = m.getDay();
   if (dow === 0 || dow === 6) return false;
   const mins = m.getHours() * 60 + m.getMinutes();
-  return ENTRY_WINDOWS.some(([a, b]) => mins >= a && mins < b);
+  return ENTRY_WINDOWS.some(([a, b]) => mins >= a && mins <= b);
 }
 
 /* ═══ SEMAPHORE ═══ */
@@ -300,6 +300,8 @@ async function doEntries(state, candleMap, divMap, instrMap) {
 
       const lotSize = instrMap[s.secid]?.lot || 1;
       const lots = Math.max(1, Math.floor(s.stake / (px * lotSize)));
+      const estCost = px * lots * lotSize;
+      if (estCost > state.cashRub) { log(`SKIP ${s.secid}: cost ${estCost.toFixed(0)} > cash ${state.cashRub.toFixed(0)}`); continue; }
       log(`BUY ${s.secid}: VR=${s.vr.toFixed(1)} ${s.tier.name} ${lots}lots @${px.toFixed(2)}`);
 
       const result = await executeBuy(TOKEN, ACCOUNT, uid, lots, DRY_RUN, log);
